@@ -30,9 +30,9 @@ struct Ticker {
 }
 
 impl Ticker {
-    pub fn new(tickRate: u64) -> Ticker {
+    pub fn new(tick_rate: u64) -> Ticker {
         Ticker {
-            tickrate: tickRate
+            tickrate: tick_rate
         }
     }
 
@@ -52,7 +52,7 @@ impl Ticker {
                 // default => {
                 //     println!("update");
                 // },
-                recv(tick_rx) -> msg => game_loop()
+                recv(tick_rx) -> _msg => game_loop()
             }
         }
     }
