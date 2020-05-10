@@ -1,3 +1,7 @@
+use std::thread;
+use std::time::Duration;
+use crossbeam::channel;
+
 pub struct Game {
     ticker: Option<Ticker>,
 }
@@ -9,30 +13,47 @@ impl Game {
         }
     }
 
-    pub fn add_ticker(&mut self, tick_rate: u8) {
+    pub fn add_ticker(&mut self, tick_rate: u64) {
         self.ticker = Some(Ticker::new(tick_rate));
     }
 
     pub fn start_ticker(self, game_loop: &dyn Fn()) {
         match self.ticker {
-            Some(mut ticker) => ticker.run(game_loop),
+            Some(ticker) => ticker.run(game_loop),
             None => println!("Ticker not instantiated")
         }
     }
 }
 
 struct Ticker {
-    tickrate: u8
+    tickrate: u64
 }
 
 impl Ticker {
-    pub fn new(tickRate: u8) -> Ticker {
+    pub fn new(tickRate: u64) -> Ticker {
         Ticker {
             tickrate: tickRate
         }
     }
 
-    pub fn run(&mut self, game_loop: &dyn Fn()) {
-        game_loop();
+    pub fn run(self, game_loop: &dyn Fn()) {
+        let (tick_tx, tick_rx) = channel::bounded(0);
+        let ms = 1000 / self.tickrate;
+
+        thread::spawn(move || {
+            loop {
+                thread::sleep(Duration::from_millis(ms));
+                tick_tx.send("tick").unwrap();
+            }
+        });
+
+        loop {
+            channel::select! {
+                // default => {
+                //     println!("update");
+                // },
+                recv(tick_rx) -> msg => game_loop()
+            }
+        }
     }
 }
