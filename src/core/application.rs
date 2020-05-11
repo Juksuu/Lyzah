@@ -2,13 +2,13 @@ use std::thread;
 use std::time::Duration;
 use crossbeam::channel;
 
-pub struct Game {
+pub struct App {
     ticker: Option<Ticker>,
 }
 
-impl Game {
-    pub fn new() -> Game {
-        Game {
+impl App {
+    pub fn new() -> App {
+        App {
             ticker: None,
         }
     }
