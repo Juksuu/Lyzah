@@ -1,2 +1,1 @@
-pub use self::context::GameWindowContext;
-mod context;
+pub mod context;

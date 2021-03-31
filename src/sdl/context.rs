@@ -3,11 +3,19 @@ extern crate sdl2;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
+use sdl2::render::RendererInfo;
 use std::time::Duration;
+
+#[derive(PartialEq)]
+enum RunState {
+    Running,
+    Stopped,
+}
 
 pub struct GameWindowContext {
     sdl_context: sdl2::Sdl,
     canvas: Option<sdl2::render::WindowCanvas>,
+    run_state: RunState,
 }
 
 impl GameWindowContext {
@@ -17,6 +25,7 @@ impl GameWindowContext {
         Self {
             sdl_context,
             canvas: None,
+            run_state: RunState::Stopped,
         }
     }
 
@@ -32,12 +41,20 @@ impl GameWindowContext {
         canvas.present();
 
         self.canvas = Some(canvas);
+        self.run_state = RunState::Running;
         self
     }
 
-    pub fn run_loop(self) {
-        let mut canvas = self.canvas.unwrap();
+    pub fn get_info(&self) -> Option<RendererInfo> {
+        match &self.canvas {
+            Some(canvas) => Some(canvas.info()),
+            _ => None,
+        }
+    }
+
+    pub fn run_render_loop(self) {
         let mut event_pump = self.sdl_context.event_pump().unwrap();
+        let mut canvas = self.canvas.unwrap();
 
         let mut i = 0;
         'mainloop: loop {

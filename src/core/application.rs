@@ -15,7 +15,7 @@ impl App {
         self.ticker = Some(Ticker::new(tick_rate));
     }
 
-    pub fn start_ticker(self, game_loop: &dyn Fn()) {
+    pub fn start_ticker(self, game_loop: Box<dyn Fn() + Send>) {
         match self.ticker {
             Some(ticker) => ticker.run(game_loop),
             None => println!("Ticker not instantiated"),
@@ -34,7 +34,7 @@ impl Ticker {
         }
     }
 
-    pub fn run(self, game_loop: &dyn Fn()) {
+    pub fn run(self, game_loop: Box<dyn Fn() + Send>) {
         let (tick_tx, tick_rx) = channel::bounded(0);
         let ms = 1000 / self.tickrate;
 
@@ -43,13 +43,15 @@ impl Ticker {
             tick_tx.send("tick").unwrap();
         });
 
-        loop {
-            channel::select! {
-                // default => {
-                //     println!("update");
-                // },
-                recv(tick_rx) -> _msg => game_loop()
+        thread::spawn(move || {
+            loop {
+                channel::select! {
+                    // default => {
+                    //     println!("update");
+                    // },
+                    recv(tick_rx) -> _msg => game_loop()
+                }
             }
-        }
+        });
     }
 }
