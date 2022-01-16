@@ -1,7 +1,16 @@
-use std::{iter::once, path::Path, fs};
-
+use std::{iter::once, path::Path, fs, num::NonZeroU32};
+use image::{ImageBuffer, Rgba, GenericImageView};
 use wgpu::*;
 use winit::{window::Window, dpi::PhysicalSize};
+
+use crate::{stage::Stage, vertex::Vertex};
+
+struct RenderData {
+    bind_group: BindGroup,
+    vertex_buffer: Buffer,
+    index_buffer: Buffer,
+    num_indices: u32
+}
 
 pub struct Renderer {
     surface: Surface,
@@ -9,7 +18,8 @@ pub struct Renderer {
     queue: Queue,
     config: SurfaceConfiguration,
     clear_color: Color,
-    render_pipeline: RenderPipeline
+    render_pipeline: RenderPipeline,
+    render_data: Vec<RenderData>,
 }
 
 impl Renderer {
@@ -48,10 +58,34 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
+        let texture_bind_group_layout = device.create_bind_group_layout(
+            &BindGroupLayoutDescriptor {
+                label: Some("texture_bind_group_layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: TextureViewDimension::D2,
+                            sample_type: TextureSampleType::Float { filterable: true }
+                        },
+                        count: None
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                        count: None
+                    }
+                ]
+            }
+        );
+
         let render_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&texture_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -67,7 +101,7 @@ impl Renderer {
                 &layout,
                 config.format,
                 None,
-                &[],
+                &[Vertex::desc()],
                 shader,
             )
         };
@@ -79,6 +113,7 @@ impl Renderer {
             config,
             render_pipeline,
             clear_color: Color::BLUE,
+            render_data: Vec::new()
         }
     }
 
@@ -94,7 +129,7 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self) -> Result<(), SurfaceError> {
+    pub fn render(&mut self, stage: &Stage) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&TextureViewDescriptor::default());
 
@@ -119,6 +154,41 @@ impl Renderer {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
+
+
+            for sprite in stage.children.as_slice() {
+                let texture = &sprite.texture;
+                
+                let rgba = texture.image.to_rgba8();
+                let dimensions = texture.image.dimensions();
+                let bind_group = self.create_bind_group(&texture.name, texture.size, &rgba, dimensions);
+
+                let mut vertices = texture.vertices.clone();
+                for mut ele in vertices.as_mut_slice() {
+                    ele.position[0] /= self.config.width as f32;
+                    ele.position[1] /= self.config.height as f32;
+                }
+
+
+                let vertex_buffer = self.create_buffer("vertex_buffer", vertices.as_slice(), BufferUsages::VERTEX);
+                let index_buffer = self.create_buffer("index_buffer", texture.indices.as_slice(), BufferUsages::INDEX);
+
+                self.render_data.push(
+                    RenderData {
+                        bind_group,
+                        vertex_buffer,
+                        index_buffer,
+                        num_indices: texture.indices.len() as u32
+                    }
+                );
+            }
+
+            for data in self.render_data.as_slice() {
+                render_pass.set_bind_group(0, &data.bind_group, &[]);
+                render_pass.set_vertex_buffer(0, data.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(data.index_buffer.slice(..), IndexFormat::Uint16);
+                render_pass.draw_indexed(0..data.num_indices, 0, 0..1);
+            }
         }
 
 
@@ -126,6 +196,76 @@ impl Renderer {
         output.present();
 
         Ok(())
+    }
+
+    pub fn create_bind_group(
+        &self,
+        name: &str,
+        texture_size: wgpu::Extent3d,
+        rgba: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+        dimension: (u32, u32)
+    ) -> BindGroup {
+        let texture = self.device.create_texture(&TextureDescriptor {
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            label: Some(name),
+        });
+
+        self.queue.write_texture(
+            ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All
+            },
+            rgba,
+            ImageDataLayout {
+                offset: 0,
+                bytes_per_row: NonZeroU32::new(4 * dimension.0),
+                rows_per_image: NonZeroU32::new(dimension.1)
+            },
+            texture_size
+        );
+
+        let texture_view = texture.create_view(&TextureViewDescriptor::default());
+        let sampler = self.device.create_sampler(&SamplerDescriptor {
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Nearest,
+            mipmap_filter: FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        self.device.create_bind_group(
+            &BindGroupDescriptor {
+                layout: &self.render_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureView(&texture_view),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::Sampler(&sampler)
+                    }
+                ],
+                label: Some(name)
+            }
+        )
+    }
+
+    pub fn create_buffer<T>(&self, name: &str, data: &[T], usage: BufferUsages) -> wgpu::Buffer where T: bytemuck::Pod {
+        util::DeviceExt::create_buffer_init(&self.device, &util::BufferInitDescriptor {
+                label: Some(name),
+                contents: bytemuck::cast_slice(data),
+                usage
+            })
     }
 }
 
