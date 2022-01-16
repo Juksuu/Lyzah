@@ -13,6 +13,7 @@ pub struct Texture {
 
 impl Texture {
     pub fn new(path: PathBuf) -> Self {
+        let name = path.file_name().unwrap().to_str().unwrap().to_string();
         let bytes = fs::read(path).unwrap();
         let image = image::load_from_memory(&bytes).unwrap();
 
@@ -27,7 +28,7 @@ impl Texture {
         let (vertices, indices) = calculate_buffers(dimensions.0 as f32, dimensions.1 as f32);
 
         Texture {
-            name: "test_sprite".to_string(),
+            name,
             size,
             image,
             vertices,

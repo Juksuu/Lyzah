@@ -1,4 +1,5 @@
 mod app;
+mod instance;
 mod renderer;
 mod sprite;
 mod stage;

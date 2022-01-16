@@ -1,15 +1,21 @@
-use std::{iter::once, path::Path, fs, num::NonZeroU32};
+use std::{iter::once, path::Path, fs, num::NonZeroU32, collections::HashMap};
+use cgmath::prelude::*;
 use image::{ImageBuffer, Rgba, GenericImageView};
 use wgpu::*;
 use winit::{window::Window, dpi::PhysicalSize};
 
-use crate::{stage::Stage, vertex::Vertex};
+use crate::{stage::Stage, vertex::Vertex, instance::{InstanceRaw, self}};
 
-struct RenderData {
+struct TextureData {
     bind_group: BindGroup,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
     num_indices: u32
+}
+
+pub struct RenderData {
+    texture_data: TextureData,
+    instances: Vec<InstanceRaw>,
 }
 
 pub struct Renderer {
@@ -19,7 +25,8 @@ pub struct Renderer {
     config: SurfaceConfiguration,
     clear_color: Color,
     render_pipeline: RenderPipeline,
-    render_data: Vec<RenderData>,
+    render_data: HashMap<String, RenderData>,
+    instance_buffers: HashMap<String, Buffer>
 }
 
 impl Renderer {
@@ -101,7 +108,7 @@ impl Renderer {
                 &layout,
                 config.format,
                 None,
-                &[Vertex::desc()],
+                &[Vertex::desc(), instance::InstanceRaw::desc()],
                 shader,
             )
         };
@@ -113,7 +120,8 @@ impl Renderer {
             config,
             render_pipeline,
             clear_color: Color::BLUE,
-            render_data: Vec::new()
+            render_data: HashMap::new(),
+            instance_buffers: HashMap::new()
         }
     }
 
@@ -137,6 +145,9 @@ impl Renderer {
             label: Some("Render Encoder")
         });
 
+        self.render_data.clear();
+        self.instance_buffers.clear();
+
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -158,36 +169,79 @@ impl Renderer {
 
             for sprite in stage.children.as_slice() {
                 let texture = &sprite.texture;
-                
-                let rgba = texture.image.to_rgba8();
-                let dimensions = texture.image.dimensions();
-                let bind_group = self.create_bind_group(&texture.name, texture.size, &rgba, dimensions);
 
-                let mut vertices = texture.vertices.clone();
-                for mut ele in vertices.as_mut_slice() {
-                    ele.position[0] /= self.config.width as f32;
-                    ele.position[1] /= self.config.height as f32;
-                }
+                match self.render_data.get_mut(&texture.name) {
+                    Some(data) => {
+                        let position = cgmath::Vector3 {
+                            x: sprite.position.x / self.config.width as f32,
+                            y: sprite.position.y / self.config.height as f32,
+                            z: 0.0
+                        };
+                        let rotation = cgmath::Quaternion::from_angle_z(cgmath::Rad(sprite.rotation));
 
+                        let instance = instance::Instance {
+                            position,
+                            rotation
+                        };
 
-                let vertex_buffer = self.create_buffer("vertex_buffer", vertices.as_slice(), BufferUsages::VERTEX);
-                let index_buffer = self.create_buffer("index_buffer", texture.indices.as_slice(), BufferUsages::INDEX);
-
-                self.render_data.push(
-                    RenderData {
-                        bind_group,
-                        vertex_buffer,
-                        index_buffer,
-                        num_indices: texture.indices.len() as u32
+                        data.instances.push(instance.to_raw());
                     }
-                );
+                    None => {
+                        let rgba = texture.image.to_rgba8();
+                        let dimensions = texture.image.dimensions();
+                        let bind_group = self.create_bind_group(&texture.name, texture.size, &rgba, dimensions);
+
+                        let mut vertices = texture.vertices.clone();
+                        for mut ele in vertices.as_mut_slice() {
+                            ele.position[0] /= self.config.width as f32;
+                            ele.position[1] /= self.config.height as f32;
+                        }
+
+
+                        let vertex_buffer = self.create_buffer("vertex_buffer", vertices.as_slice(), BufferUsages::VERTEX);
+                        let index_buffer = self.create_buffer("index_buffer", texture.indices.as_slice(), BufferUsages::INDEX);
+
+
+                        let mut instances = Vec::new();
+                        let position = cgmath::Vector3 {
+                            x: sprite.position.x / self.config.width as f32,
+                            y: sprite.position.y / self.config.height as f32,
+                            z: 0.0
+                        };
+                        let rotation = cgmath::Quaternion::from_angle_z(cgmath::Rad(sprite.rotation));
+
+                        let instance = instance::Instance {
+                            position,
+                            rotation
+                        };
+
+                        instances.push(instance.to_raw());
+
+                        self.render_data.insert(texture.name.clone(), RenderData {
+                            texture_data: TextureData {
+                                bind_group,
+                                vertex_buffer,
+                                index_buffer,
+                                num_indices: texture.indices.len() as u32
+                            },
+                            instances,
+                        });
+                    }
+                }
             }
 
-            for data in self.render_data.as_slice() {
-                render_pass.set_bind_group(0, &data.bind_group, &[]);
-                render_pass.set_vertex_buffer(0, data.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(data.index_buffer.slice(..), IndexFormat::Uint16);
-                render_pass.draw_indexed(0..data.num_indices, 0, 0..1);
+            for (key, data) in self.render_data.iter() {
+                let instance_buffer = self.create_buffer("Instance buffer", data.instances.as_slice(), BufferUsages::VERTEX);
+                self.instance_buffers.insert(key.clone(), instance_buffer);
+
+            }
+
+            for (key, data) in self.render_data.iter() {
+                render_pass.set_bind_group(0, &data.texture_data.bind_group, &[]);
+                render_pass.set_vertex_buffer(0, data.texture_data.vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, self.instance_buffers.get(key).unwrap().slice(..));
+                render_pass.set_index_buffer(data.texture_data.index_buffer.slice(..), IndexFormat::Uint16);
+                render_pass.draw_indexed(0..data.texture_data.num_indices, 0, 0..data.instances.len() as u32);
             }
         }
 
