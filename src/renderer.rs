@@ -3,8 +3,7 @@ use cgmath::prelude::*;
 use image::{ImageBuffer, Rgba, GenericImageView};
 use wgpu::*;
 use winit::{window::Window, dpi::PhysicalSize};
-
-use crate::{vertex::Vertex, instance::{InstanceRaw, self}, Sprite, camera::{Camera2D, CameraUniform}};
+use crate::{vertex::Vertex, instance::{InstanceRaw, self}, Sprite};
 
 struct TextureData {
     bind_group: BindGroup,
@@ -27,10 +26,6 @@ pub struct Renderer {
     render_pipeline: RenderPipeline,
     render_data: HashMap<String, RenderData>,
     instance_buffers: HashMap<String, Buffer>,
-    camera: Camera2D,
-    camera_buffer: Buffer,
-    camera_uniform: CameraUniform,
-    camera_bind_group: BindGroup
 }
 
 impl Renderer {
@@ -69,27 +64,6 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        let camera = Camera2D {
-            // position the camera one unit up and 2 units back
-            // +z is out of the screen
-            eye: (0.0, 0.0, 1.0).into(),
-            // have it look at the origin
-            target: (0.0, 0.0, 0.0).into(),
-            // which way is "up"
-            up: cgmath::Vector3::unit_y(),
-            width: config.width as f32,
-            height: config.height as f32,
-        };
-
-        let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
-
-        let camera_buffer = util::DeviceExt::create_buffer_init(&device, &wgpu::util::BufferInitDescriptor {
-                label: Some("Camera Buffer"),
-                contents: bytemuck::cast_slice(&[camera_uniform]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-
         let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -104,17 +78,6 @@ impl Renderer {
                 }
             ],
             label: Some("camera_bind_group_layout"),
-        });
-
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                }
-            ],
-            label: Some("camera_bind_group"),
         });
 
         let texture_bind_group_layout = device.create_bind_group_layout(
@@ -174,10 +137,6 @@ impl Renderer {
             clear_color: Color::BLUE,
             render_data: HashMap::new(),
             instance_buffers: HashMap::new(),
-            camera,
-            camera_buffer,
-            camera_uniform,
-            camera_bind_group
         }
     }
 
@@ -191,13 +150,10 @@ impl Renderer {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
 
-            self.camera.resize(self.config.width, self.config.height);
-            self.camera_uniform.update_view_proj(&self.camera);
-            self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
         }
     }
 
-    pub fn render(&mut self, renderables: &Vec<Sprite>) -> Result<(), SurfaceError> {
+    pub fn render(&mut self, renderables: &Vec<Sprite>, camera_bind_group: &BindGroup) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&TextureViewDescriptor::default());
 
@@ -233,8 +189,8 @@ impl Renderer {
                 match self.render_data.get_mut(&texture.name) {
                     Some(data) => {
                         let position = cgmath::Vector3 {
-                            x: sprite.position.x, // / self.config.width as f32,
-                            y: sprite.position.y, // / self.config.height as f32,
+                            x: sprite.position.x,
+                            y: sprite.position.y,
                             z: 0.0
                         };
                         let rotation = cgmath::Quaternion::from_angle_z(cgmath::Rad(sprite.rotation));
@@ -249,14 +205,7 @@ impl Renderer {
                     None => {
                         let rgba = texture.image.to_rgba8();
                         let dimensions = texture.image.dimensions();
-                        let bind_group = self.create_bind_group(&texture.name, texture.size, &rgba, dimensions);
-                        //
-                        // let mut vertices = texture.vertices.clone();
-                        // for mut ele in vertices.as_mut_slice() {
-                        //     ele.position[0] /= self.config.width as f32;
-                        //     ele.position[1] /= self.config.height as f32;
-                        // }
-
+                        let bind_group = self.create_texture_bind_group(&texture.name, texture.size, &rgba, dimensions);
 
                         let vertex_buffer = self.create_buffer("vertex_buffer", texture.vertices.as_slice(), BufferUsages::VERTEX);
                         let index_buffer = self.create_buffer("index_buffer", texture.indices.as_slice(), BufferUsages::INDEX);
@@ -264,8 +213,8 @@ impl Renderer {
 
                         let mut instances = Vec::new();
                         let position = cgmath::Vector3 {
-                            x: sprite.position.x, // / self.config.width as f32,
-                            y: sprite.position.y, // / self.config.height as f32,
+                            x: sprite.position.x,
+                            y: sprite.position.y,
                             z: 0.0
                         };
                         let rotation = cgmath::Quaternion::from_angle_z(cgmath::Rad(sprite.rotation));
@@ -298,7 +247,7 @@ impl Renderer {
 
             for (key, data) in self.render_data.iter() {
                 render_pass.set_bind_group(0, &data.texture_data.bind_group, &[]);
-                render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+                render_pass.set_bind_group(1, camera_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, data.texture_data.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, self.instance_buffers.get(key).unwrap().slice(..));
                 render_pass.set_index_buffer(data.texture_data.index_buffer.slice(..), IndexFormat::Uint16);
@@ -313,7 +262,20 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn create_bind_group(
+    pub fn create_camera_bind_group(&self, buffer: &Buffer) -> BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &self.render_pipeline.get_bind_group_layout(1),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }
+            ],
+            label: Some("camera_bind_group"),
+        })
+    }
+
+    pub fn create_texture_bind_group(
         &self,
         name: &str,
         texture_size: wgpu::Extent3d,
@@ -381,6 +343,10 @@ impl Renderer {
                 contents: bytemuck::cast_slice(data),
                 usage
             })
+    }
+
+    pub fn write_buffer<T>(&self, buffer: &Buffer, offset: u64, data: &[T]) where T: bytemuck::Pod {
+        self.queue.write_buffer(buffer, offset, bytemuck::cast_slice(data));
     }
 }
 
