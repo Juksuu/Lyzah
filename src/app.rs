@@ -1,16 +1,15 @@
+use crate::{renderer::Renderer, Sprite};
 use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
 
-use crate::{renderer::Renderer, stage::Stage};
-
 pub struct Application {
     event_loop: EventLoop<()>,
     window: Window,
     pub renderer: Renderer,
-    pub stage: Stage,
+    pub renderables: Vec<Sprite>,
 }
 
 impl Application {
@@ -20,13 +19,11 @@ impl Application {
 
         let renderer = pollster::block_on(Renderer::new(&window));
 
-        let stage = Stage::new();
-
         Self {
             event_loop,
             window,
             renderer,
-            stage,
+            renderables: Vec::new(),
         }
     }
 
@@ -42,7 +39,7 @@ impl Application {
                     // last_render_time = now;
                     //
                     // state.update(dt);
-                    match self.renderer.render(&self.stage) {
+                    match self.renderer.render(&self.renderables) {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost) => self.renderer.resize(None),
                         Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
