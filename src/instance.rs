@@ -1,10 +1,5 @@
 use std::mem;
 
-pub struct Point2D {
-    pub x: f32,
-    pub y: f32,
-}
-
 pub struct Instance {
     pub position: cgmath::Vector3<f32>,
     pub rotation: cgmath::Quaternion<f32>,
