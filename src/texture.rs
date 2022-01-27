@@ -40,10 +40,10 @@ impl Texture {
 fn calculate_buffers(width: f32, height: f32) -> (Vec<Vertex>, Vec<u16>) {
     #[rustfmt::skip]
     let vertices: Vec<Vertex> = vec![
-        Vertex { position: [0.0, 0.0, 0.0], tex_coords: [0.0, 1.0] },
-        Vertex { position: [width, 0.0, 0.0], tex_coords: [1.0, 1.0] },
-        Vertex { position: [width, height, 0.0], tex_coords: [1.0, 0.0] },
-        Vertex { position: [0.0, height, 0.0], tex_coords: [0.0, 0.0] },
+        Vertex { position: [0.0, -height, 0.0], tex_coords: [0.0, 1.0] },
+        Vertex { position: [width, -height, 0.0], tex_coords: [1.0, 1.0] },
+        Vertex { position: [width, 0.0, 0.0], tex_coords: [1.0, 0.0] },
+        Vertex { position: [0.0, 0.0, 0.0], tex_coords: [0.0, 0.0] },
     ];
 
     #[rustfmt::skip]

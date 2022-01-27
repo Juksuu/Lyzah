@@ -2,15 +2,24 @@ use std::mem;
 
 pub struct Instance {
     pub scale: cgmath::Vector3<f32>,
+    pub anchor: cgmath::Vector3<f32>,
     pub position: cgmath::Vector3<f32>,
     pub rotation: cgmath::Quaternion<f32>,
 }
 
 impl Instance {
-    pub fn to_raw(&self) -> InstanceRaw {
+    pub fn to_raw(&self, size: &wgpu::Extent3d) -> InstanceRaw {
         let matrix = cgmath::Matrix4::from_translation(self.position)
             * cgmath::Matrix4::from(self.rotation)
-            * cgmath::Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
+            * cgmath::Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z)
+            * cgmath::Matrix4::from_translation(
+                (
+                    size.width as f32 * -self.anchor.x,
+                    size.height as f32 * self.anchor.y,
+                    0.0,
+                )
+                    .into(),
+            );
 
         InstanceRaw {
             model: matrix.into(),

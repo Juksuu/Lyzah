@@ -43,6 +43,10 @@ impl Application {
                     // last_render_time = now;
                     //
                     // state.update(dt);
+
+                    for sprite in self.renderables.iter_mut() {
+                        sprite.set_rotation(sprite.rotation + 0.01)
+                    }
                     match self
                         .renderer
                         .render(&self.renderables, &self.default_camera.bind_group)
