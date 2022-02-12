@@ -1,5 +1,5 @@
 use crate::vertex::Vertex;
-use image::GenericImageView;
+use image::{DynamicImage, GenericImageView};
 use std::fs;
 use std::path::PathBuf;
 
@@ -29,6 +29,26 @@ impl Texture {
 
         Texture {
             name,
+            size,
+            image,
+            vertices,
+            indices,
+        }
+    }
+
+    pub fn from_image(name: &str, image: DynamicImage) -> Self {
+        let dimensions = image.dimensions();
+
+        let size = wgpu::Extent3d {
+            width: dimensions.0,
+            height: dimensions.1,
+            depth_or_array_layers: 1,
+        };
+
+        let (vertices, indices) = calculate_buffers(dimensions.0 as f32, dimensions.1 as f32);
+
+        Texture {
+            name: name.to_string(),
             size,
             image,
             vertices,

@@ -1,7 +1,7 @@
 use crate::{
     instance::{self, InstanceRaw},
     vertex::Vertex,
-    Sprite,
+    Resources, Sprite,
 };
 use image::{GenericImageView, ImageBuffer, Rgba};
 use std::{collections::HashMap, fs, iter::once, num::NonZeroU32, path::Path};
@@ -157,6 +157,7 @@ impl Renderer {
     pub fn render(
         &mut self,
         renderables: &Vec<Sprite>,
+        resources: &Resources,
         camera_bind_group: &BindGroup,
     ) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;
@@ -190,7 +191,7 @@ impl Renderer {
             render_pass.set_pipeline(&self.render_pipeline);
 
             for sprite in renderables {
-                let texture = &sprite.texture;
+                let texture = resources.get(&sprite.texture_id);
 
                 match self.render_data.get_mut(&texture.name) {
                     Some(data) => {

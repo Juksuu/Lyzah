@@ -3,11 +3,11 @@ use crate::{
     texture::Texture,
 };
 use cgmath::*;
-use std::path::PathBuf;
+use wgpu::Extent3d;
 
 #[readonly::make]
 pub struct Sprite {
-    pub texture: Texture,
+    pub texture_id: String,
     #[readonly]
     pub rotation: f32,
     #[readonly]
@@ -17,14 +17,14 @@ pub struct Sprite {
     #[readonly]
     pub anchor: Point2<f32>,
 
+    texture_size: Extent3d,
     instance: Instance,
     instance_raw: InstanceRaw,
 }
 
 impl Sprite {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(texture: &Texture) -> Self {
         let rotation = 0.0;
-        let texture = Texture::new(path);
         let position = point2(0.0, 0.0);
         let scale = point2(1.0, 1.0);
         let anchor = point2(0.0, 0.0);
@@ -35,10 +35,10 @@ impl Sprite {
         Sprite {
             scale,
             anchor,
-            texture,
+            texture_id: texture.name.clone(),
+            texture_size: texture.size,
             position,
             rotation,
-
             instance,
             instance_raw,
         }
@@ -57,7 +57,7 @@ impl Sprite {
             &self.position,
             &self.scale,
             self.rotation,
-            &self.texture.size,
+            &self.texture_size,
         );
     }
 
@@ -70,7 +70,7 @@ impl Sprite {
             &self.position,
             &self.scale,
             self.rotation,
-            &self.texture.size,
+            &self.texture_size,
         );
     }
 
@@ -82,7 +82,7 @@ impl Sprite {
             &self.position,
             &self.scale,
             self.rotation,
-            &self.texture.size,
+            &self.texture_size,
         );
     }
 
@@ -95,7 +95,7 @@ impl Sprite {
             &self.position,
             &self.scale,
             self.rotation,
-            &self.texture.size,
+            &self.texture_size,
         );
     }
 }

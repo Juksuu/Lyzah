@@ -1,4 +1,4 @@
-use crate::{renderer::Renderer, Camera2D, Sprite};
+use crate::{renderer::Renderer, Camera2D, Resources, Sprite};
 use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -10,6 +10,7 @@ pub struct Application {
     window: Window,
     default_camera: Camera2D,
     pub renderer: Renderer,
+    pub resources: Resources,
     pub renderables: Vec<Sprite>,
 }
 
@@ -19,12 +20,14 @@ impl Application {
         let window = WindowBuilder::new().build(&event_loop).unwrap();
 
         let renderer = pollster::block_on(Renderer::new(&window));
-
         let default_camera = Camera2D::new(&renderer);
+
+        let resources = Resources::new();
 
         Self {
             window,
             renderer,
+            resources,
             event_loop,
             default_camera,
             renderables: Vec::new(),
@@ -47,10 +50,11 @@ impl Application {
                     for sprite in self.renderables.iter_mut() {
                         sprite.set_rotation(sprite.rotation + 0.01)
                     }
-                    match self
-                        .renderer
-                        .render(&self.renderables, &self.default_camera.bind_group)
-                    {
+                    match self.renderer.render(
+                        &self.renderables,
+                        &self.resources,
+                        &self.default_camera.bind_group,
+                    ) {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost) => self.renderer.resize(None),
                         Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
