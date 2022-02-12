@@ -1,13 +1,15 @@
 use crate::{
     instance::{Instance, InstanceRaw},
+    resources::TextureId,
     texture::Texture,
 };
 use cgmath::*;
 use wgpu::Extent3d;
 
 #[readonly::make]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Sprite {
-    pub texture_id: String,
+    pub texture_id: TextureId,
     #[readonly]
     pub rotation: f32,
     #[readonly]
@@ -35,7 +37,7 @@ impl Sprite {
         Sprite {
             scale,
             anchor,
-            texture_id: texture.name.clone(),
+            texture_id: texture.id,
             texture_size: texture.size,
             position,
             rotation,

@@ -1,4 +1,6 @@
-use crate::{renderer::Renderer, Camera2D, Resources, Sprite};
+use crate::{
+    instance::InstanceRaw, renderer::Renderer, resources::TextureId, Camera2D, Resources, Sprite,
+};
 use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -11,7 +13,6 @@ pub struct Application {
     default_camera: Camera2D,
     pub renderer: Renderer,
     pub resources: Resources,
-    pub renderables: Vec<Sprite>,
 }
 
 impl Application {
@@ -30,11 +31,13 @@ impl Application {
             resources,
             event_loop,
             default_camera,
-            renderables: Vec::new(),
         }
     }
 
-    pub fn run(mut self) {
+    pub fn run<F: 'static>(mut self, mut run_on_update: F)
+    where
+        F: FnMut() -> Vec<(TextureId, InstanceRaw)>,
+    {
         println!("Starting application");
 
         self.event_loop.run(move |event, _, control_flow| {
@@ -47,12 +50,11 @@ impl Application {
                     //
                     // state.update(dt);
 
-                    for sprite in self.renderables.iter_mut() {
-                        sprite.set_rotation(sprite.rotation + 0.01)
-                    }
+                    let renderables = run_on_update();
+
                     match self.renderer.render(
-                        &self.renderables,
-                        &self.resources,
+                        renderables,
+                        &mut self.resources,
                         &self.default_camera.bind_group,
                     ) {
                         Ok(_) => {}

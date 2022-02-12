@@ -1,5 +1,6 @@
 use std::mem;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Instance {
     pub scale: cgmath::Vector3<f32>,
     pub anchor: cgmath::Vector3<f32>,
@@ -28,7 +29,7 @@ impl Instance {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceRaw {
     model: [[f32; 4]; 4],
 }

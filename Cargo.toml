@@ -13,6 +13,7 @@ anyhow = "1.0.52"
 bytemuck = { version = "1.7.3", features = ["derive"] }
 cgmath = "0.18.0"
 image = "0.23.14"
+legion = "0.4.0"
 pollster = "0.2.4"
 readonly = "0.2.0"
 wgpu = "0.12.0"
