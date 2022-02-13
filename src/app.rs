@@ -1,16 +1,32 @@
-use crate::{
-    instance::InstanceRaw, renderer::Renderer, resources::TextureId, Camera2D, Resources, Sprite,
-};
+use std::time::{Duration, Instant};
+
+use crate::{renderer::Renderer, Camera2D, Resources};
 use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
 
+pub struct Time {
+    pub elapsed: Duration,
+    pub delta_time: Duration,
+}
+
+impl Time {
+    pub fn default() -> Self {
+        Time {
+            elapsed: Duration::from_secs(0),
+            delta_time: Duration::from_secs(0),
+        }
+    }
+}
+
 pub struct Application {
     event_loop: EventLoop<()>,
     window: Window,
     default_camera: Camera2D,
+    start_time: Instant,
+    last_render_time: Instant,
     pub renderer: Renderer,
     pub resources: Resources,
 }
@@ -24,13 +40,17 @@ impl Application {
         let default_camera = Camera2D::new(&renderer);
 
         let resources = Resources::new();
+        let start_time = Instant::now();
+        let last_render_time = start_time;
 
         Self {
             window,
             renderer,
             resources,
+            start_time,
             event_loop,
             default_camera,
+            last_render_time,
         }
     }
 
@@ -48,11 +68,16 @@ impl Application {
             *control_flow = ControlFlow::Poll;
             match event {
                 Event::RedrawRequested(window_id) if window_id == self.window.id() => {
-                    // let now = Instant::now();
-                    // let dt = now - last_render_time;
-                    // last_render_time = now;
-                    //
-                    // state.update(dt);
+                    let now = Instant::now();
+                    let dt = now - self.last_render_time;
+                    let elapsed = now - self.start_time;
+                    self.last_render_time = now;
+
+                    if resources.contains::<Time>() {
+                        let mut time = resources.get_mut::<Time>().unwrap();
+                        time.elapsed = elapsed;
+                        time.delta_time = dt;
+                    }
 
                     run_on_update(&mut world, &mut resources);
 
