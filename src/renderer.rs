@@ -1,10 +1,6 @@
-use crate::{
-    instance::{self, InstanceRaw},
-    resources::TextureId,
-    vertex::Vertex,
-    Resources,
-};
+use crate::{instance, vertex::Vertex, Resources, Sprite};
 use image::{GenericImageView, ImageBuffer, Rgba};
+use legion::*;
 use std::{collections::HashMap, fs, iter::once, num::NonZeroU32, path::Path};
 use wgpu::*;
 use winit::{dpi::PhysicalSize, window::Window};
@@ -18,7 +14,7 @@ struct TextureData {
 
 pub struct RenderData {
     texture_data: TextureData,
-    instances: Vec<InstanceRaw>,
+    instances: Vec<instance::InstanceRaw>,
 }
 
 pub struct Renderer {
@@ -157,7 +153,7 @@ impl Renderer {
 
     pub fn render(
         &mut self,
-        renderables: Vec<(TextureId, InstanceRaw)>,
+        world: &legion::World,
         resources: &mut Resources,
         camera_bind_group: &BindGroup,
     ) -> Result<(), SurfaceError> {
@@ -191,12 +187,18 @@ impl Renderer {
 
             render_pass.set_pipeline(&self.render_pipeline);
 
-            for (texture_id, raw_instance) in renderables {
-                let texture = resources.get_by_id(texture_id);
+            // you define a query be declaring what components you want to find, and how you will access them
+            let mut query = <&Sprite>::query();
+
+            // you can then iterate through the components found in the world
+            let sprites: Vec<_> = query.iter(world).collect();
+
+            for sprite in sprites {
+                let texture = resources.get_by_id(sprite.texture_id);
 
                 match self.render_data.get_mut(&texture.name) {
                     Some(data) => {
-                        data.instances.push(raw_instance);
+                        data.instances.push(sprite.get_raw_instance());
                     }
                     None => {
                         let rgba = texture.image.to_rgba8();
@@ -220,7 +222,7 @@ impl Renderer {
                         );
 
                         let mut instances = Vec::new();
-                        instances.push(raw_instance);
+                        instances.push(sprite.get_raw_instance());
 
                         self.render_data.insert(
                             texture.name.clone(),

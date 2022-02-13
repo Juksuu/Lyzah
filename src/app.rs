@@ -34,9 +34,13 @@ impl Application {
         }
     }
 
-    pub fn run<F: 'static>(mut self, mut run_on_update: F)
-    where
-        F: FnMut() -> Vec<(TextureId, InstanceRaw)>,
+    pub fn run<F: 'static>(
+        mut self,
+        mut world: legion::World,
+        mut resources: legion::Resources,
+        mut run_on_update: F,
+    ) where
+        F: FnMut(&mut legion::World, &mut legion::Resources) -> (),
     {
         println!("Starting application");
 
@@ -50,10 +54,10 @@ impl Application {
                     //
                     // state.update(dt);
 
-                    let renderables = run_on_update();
+                    run_on_update(&mut world, &mut resources);
 
                     match self.renderer.render(
-                        renderables,
+                        &world,
                         &mut self.resources,
                         &self.default_camera.bind_group,
                     ) {
