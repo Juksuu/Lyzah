@@ -52,17 +52,16 @@ impl Input {
                 virtual_keycode: Some(key),
                 state,
                 ..
-            }) => {
-                self.pressed_keys.clear();
-                match state {
-                    ElementState::Pressed => self.pressed_keys.push(*key),
-                    ElementState::Released => {
-                        self.released_keys.push(*key);
-                        self.pressed_keys
-                            .retain(|key| !self.released_keys.contains(key));
-                    }
+            }) => match state {
+                ElementState::Pressed => {
+                    self.pressed_keys.push(*key);
                 }
-            }
+                ElementState::Released => {
+                    self.released_keys.push(*key);
+                    self.pressed_keys
+                        .retain(|key| !self.released_keys.contains(key));
+                }
+            },
             DeviceEvent::Button { button, state } => {
                 self.pressed_mouse_buttons.clear();
                 match state {
