@@ -1,25 +1,10 @@
-use std::time::{Duration, Instant};
-
-use crate::{renderer::Renderer, Camera2D, Resources};
+use crate::{renderer::Renderer, Camera2D, Resources, Time};
+use std::time::Instant;
 use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
-
-pub struct Time {
-    pub elapsed: Duration,
-    pub delta_time: Duration,
-}
-
-impl Time {
-    pub fn default() -> Self {
-        Time {
-            elapsed: Duration::from_secs(0),
-            delta_time: Duration::from_secs(0),
-        }
-    }
-}
 
 pub struct Application {
     event_loop: EventLoop<()>,
@@ -73,8 +58,8 @@ impl Application {
                     let elapsed = now - self.start_time;
                     self.last_render_time = now;
 
-                    if resources.contains::<Time>() {
-                        let mut time = resources.get_mut::<Time>().unwrap();
+                    {
+                        let mut time = resources.get_mut_or_insert::<Time>(Time::default());
                         time.elapsed = elapsed;
                         time.delta_time = dt;
                     }
