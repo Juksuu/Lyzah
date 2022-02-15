@@ -46,6 +46,7 @@ impl Input {
 
     pub(crate) fn process_device_event(&mut self, event: &DeviceEvent) {
         self.released_keys.clear();
+        self.released_mouse_buttons.clear();
 
         match event {
             DeviceEvent::Key(KeyboardInput {
@@ -62,17 +63,14 @@ impl Input {
                         .retain(|key| !self.released_keys.contains(key));
                 }
             },
-            DeviceEvent::Button { button, state } => {
-                self.pressed_mouse_buttons.clear();
-                match state {
-                    ElementState::Pressed => self.pressed_mouse_buttons.push(*button),
-                    ElementState::Released => {
-                        self.released_mouse_buttons.push(*button);
-                        self.pressed_mouse_buttons
-                            .retain(|button| !self.released_mouse_buttons.contains(button));
-                    }
+            DeviceEvent::Button { button, state } => match state {
+                ElementState::Pressed => self.pressed_mouse_buttons.push(*button),
+                ElementState::Released => {
+                    self.released_mouse_buttons.push(*button);
+                    self.pressed_mouse_buttons
+                        .retain(|button| !self.released_mouse_buttons.contains(button));
                 }
-            }
+            },
             DeviceEvent::MouseMotion { delta } => {
                 self.mouse_delta.x = delta.0 as f32;
                 self.mouse_delta.y = delta.1 as f32;
