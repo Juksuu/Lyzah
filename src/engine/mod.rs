@@ -1,4 +1,6 @@
-use crate::{renderer::Renderer, Camera2D, Resources, Time};
+pub mod input;
+
+use crate::{engine::input::Input, renderer::Renderer, Camera2D, Resources, Time};
 use std::time::Instant;
 use winit::{
     event::{Event, WindowEvent},
@@ -49,6 +51,12 @@ impl Application {
     {
         println!("Starting application");
 
+        let time = Time::default();
+        let input = Input::default();
+
+        resources.insert(time);
+        resources.insert(input);
+
         self.event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
             match event {
@@ -59,7 +67,7 @@ impl Application {
                     self.last_render_time = now;
 
                     {
-                        let mut time = resources.get_mut_or_insert::<Time>(Time::default());
+                        let mut time = resources.get_mut::<Time>().unwrap();
                         time.elapsed = elapsed;
                         time.delta_time = dt;
                     }
@@ -81,27 +89,43 @@ impl Application {
                     self.window.request_redraw();
                 }
                 Event::DeviceEvent { ref event, .. } => {
-                    // println!("{:?}", event);
+                    let mut input = resources.get_mut::<Input>().unwrap();
+                    input.process_device_event(event);
                 }
                 Event::WindowEvent {
                     ref event,
                     window_id,
-                } if window_id == self.window.id() => match event {
-                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                    WindowEvent::Resized(physical_size) => {
-                        let new_size = *physical_size;
-                        self.default_camera
-                            .resize(new_size.width, new_size.height, &self.renderer);
-                        self.renderer.resize(Some(new_size))
+                } => {
+                    if window_id == self.window.id() {
+                        let mut input = resources.get_mut::<Input>().unwrap();
+                        match event {
+                            WindowEvent::ModifiersChanged(modifiers_state) => {
+                                input.set_modifiers_state(*modifiers_state)
+                            }
+                            WindowEvent::Focused(is_focused) => input.set_focused(*is_focused),
+                            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                            WindowEvent::Resized(physical_size) => {
+                                let new_size = *physical_size;
+                                self.default_camera.resize(
+                                    new_size.width,
+                                    new_size.height,
+                                    &self.renderer,
+                                );
+                                self.renderer.resize(Some(new_size))
+                            }
+                            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                                let new_size = **new_inner_size;
+                                self.default_camera.resize(
+                                    new_size.width,
+                                    new_size.height,
+                                    &self.renderer,
+                                );
+                                self.renderer.resize(Some(new_size))
+                            }
+                            _ => {}
+                        }
                     }
-                    WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                        let new_size = **new_inner_size;
-                        self.default_camera
-                            .resize(new_size.width, new_size.height, &self.renderer);
-                        self.renderer.resize(Some(new_size))
-                    }
-                    _ => {}
-                },
+                }
                 _ => {}
             }
         });
