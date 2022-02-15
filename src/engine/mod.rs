@@ -61,17 +61,6 @@ impl Application {
             *control_flow = ControlFlow::Poll;
             match event {
                 Event::RedrawRequested(window_id) if window_id == self.window.id() => {
-                    let now = Instant::now();
-                    let dt = now - self.last_render_time;
-                    let elapsed = now - self.start_time;
-                    self.last_render_time = now;
-
-                    {
-                        let mut time = resources.get_mut::<Time>().unwrap();
-                        time.elapsed = elapsed;
-                        time.delta_time = dt;
-                    }
-
                     run_on_update(&mut world, &mut resources);
 
                     match self.renderer.render(
@@ -83,6 +72,24 @@ impl Application {
                         Err(wgpu::SurfaceError::Lost) => self.renderer.resize(None),
                         Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                         Err(e) => eprintln!("{:?}", e),
+                    }
+
+                    // Update time after current loop
+                    let now = Instant::now();
+                    let dt = now - self.last_render_time;
+                    let elapsed = now - self.start_time;
+                    self.last_render_time = now;
+
+                    {
+                        let mut time = resources.get_mut::<Time>().unwrap();
+                        time.elapsed = elapsed;
+                        time.delta_time = dt;
+                    }
+
+                    // Reset mouse delta after current update loop
+                    {
+                        let mut input = resources.get_mut::<Input>().unwrap();
+                        input.reset_mouse_delta();
                     }
                 }
                 Event::MainEventsCleared => {
@@ -100,9 +107,16 @@ impl Application {
                         let mut input = resources.get_mut::<Input>().unwrap();
                         match event {
                             WindowEvent::ModifiersChanged(modifiers_state) => {
-                                input.set_modifiers_state(*modifiers_state)
+                                input.update_modifiers_state(*modifiers_state)
+                            }
+                            WindowEvent::CursorMoved { position, .. } => {
+                                input.update_mouse_pos(*position, self.window.inner_size())
                             }
                             WindowEvent::Focused(is_focused) => input.set_focused(*is_focused),
+                            WindowEvent::CursorEntered { .. } => {
+                                input.set_mouse_inside_window(true)
+                            }
+                            WindowEvent::CursorLeft { .. } => input.set_mouse_inside_window(false),
                             WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                             WindowEvent::Resized(physical_size) => {
                                 let new_size = *physical_size;
