@@ -1,23 +1,28 @@
-use crate::{instance, vertex::Vertex, Resources, Sprite};
+pub(crate) mod instance;
+pub(crate) mod vertex;
+
+use self::vertex::Vertex;
+
+use crate::{Resources, Sprite};
 use image::{GenericImageView, ImageBuffer, Rgba};
 use legion::*;
 use std::{collections::HashMap, fs, iter::once, num::NonZeroU32, path::Path};
 use wgpu::*;
 use winit::{dpi::PhysicalSize, window::Window};
 
-struct TextureData {
+pub(crate) struct TextureData {
     bind_group: BindGroup,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
     num_indices: u32,
 }
 
-pub struct RenderData {
+pub(crate) struct RenderData {
     texture_data: TextureData,
     instances: Vec<instance::InstanceRaw>,
 }
 
-pub struct Renderer {
+pub(crate) struct Renderer {
     surface: Surface,
     device: Device,
     queue: Queue,

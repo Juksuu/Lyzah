@@ -1,16 +1,15 @@
 use std::time::Duration;
 
-mod app;
-mod camera;
-mod instance;
+mod engine;
 mod renderer;
+
+mod camera;
 mod resources;
 mod sprite;
 mod texture;
-mod vertex;
 
-pub use app::Application;
 pub use camera::Camera2D;
+pub use engine::Application;
 pub use resources::Resources;
 pub use sprite::Sprite;
 

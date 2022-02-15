@@ -1,7 +1,7 @@
 use crate::{renderer::Renderer, Camera2D, Resources, Time};
 use std::time::Instant;
 use winit::{
-    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
@@ -12,7 +12,7 @@ pub struct Application {
     default_camera: Camera2D,
     start_time: Instant,
     last_render_time: Instant,
-    pub renderer: Renderer,
+    renderer: Renderer,
     pub resources: Resources,
 }
 
@@ -80,23 +80,14 @@ impl Application {
                 Event::MainEventsCleared => {
                     self.window.request_redraw();
                 }
-                // Event::DeviceEvent { ref event, .. } => {
-                //     state.input(event);
-                // }
+                Event::DeviceEvent { ref event, .. } => {
+                    // println!("{:?}", event);
+                }
                 Event::WindowEvent {
                     ref event,
                     window_id,
                 } if window_id == self.window.id() => match event {
-                    WindowEvent::CloseRequested
-                    | WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                state: ElementState::Pressed,
-                                virtual_keycode: Some(VirtualKeyCode::Escape),
-                                ..
-                            },
-                        ..
-                    } => *control_flow = ControlFlow::Exit,
+                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                     WindowEvent::Resized(physical_size) => {
                         let new_size = *physical_size;
                         self.default_camera

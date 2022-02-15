@@ -1,5 +1,5 @@
+use crate::renderer::vertex::Vertex;
 use crate::resources::TextureId;
-use crate::vertex::Vertex;
 use image::{DynamicImage, GenericImageView};
 use std::fs;
 use std::path::PathBuf;

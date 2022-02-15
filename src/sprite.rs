@@ -1,5 +1,5 @@
 use crate::{
-    instance::{Instance, InstanceRaw},
+    renderer::instance::{Instance, InstanceRaw},
     resources::TextureId,
     texture::Texture,
 };
@@ -46,7 +46,7 @@ impl Sprite {
         }
     }
 
-    pub fn get_raw_instance(&self) -> InstanceRaw {
+    pub(crate) fn get_raw_instance(&self) -> InstanceRaw {
         self.instance_raw
     }
 

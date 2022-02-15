@@ -25,7 +25,7 @@ pub struct Camera2D {
 }
 
 impl Camera2D {
-    pub fn new(renderer: &Renderer) -> Self {
+    pub(crate) fn new(renderer: &Renderer) -> Self {
         let uniform = CameraUniform::new();
         let buffer = renderer.create_buffer(
             "camera_buffer",
@@ -51,7 +51,7 @@ impl Camera2D {
         self.position = position;
     }
 
-    pub fn resize(&mut self, width: u32, height: u32, renderer: &Renderer) {
+    pub(crate) fn resize(&mut self, width: u32, height: u32, renderer: &Renderer) {
         if width > 0 && height > 0 {
             self.width = width as f32;
             self.height = height as f32;
@@ -63,7 +63,7 @@ impl Camera2D {
         }
     }
 
-    pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+    pub(crate) fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         let view = cgmath::Matrix4::look_at_rh(self.position, self.target, self.up);
         let proj = cgmath::ortho(
             -self.width / 2.0,
@@ -80,19 +80,19 @@ impl Camera2D {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct CameraUniform {
+pub(crate) struct CameraUniform {
     view_proj: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         use cgmath::SquareMatrix;
         Self {
             view_proj: cgmath::Matrix4::identity().into(),
         }
     }
 
-    pub fn update_view_proj(&mut self, matrix: cgmath::Matrix4<f32>) {
+    pub(crate) fn update_view_proj(&mut self, matrix: cgmath::Matrix4<f32>) {
         self.view_proj = matrix.into();
     }
 }
