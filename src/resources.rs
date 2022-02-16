@@ -1,14 +1,15 @@
 use crate::texture::Texture;
 use image::{DynamicImage, ImageBuffer};
+use legion::systems::Resource;
 use std::{collections::HashMap, path::PathBuf};
 
-pub type TextureId = u32;
+pub type ResourceId = u32;
 
 pub struct Resources {
-    resources: HashMap<u32, Texture>,
-    resource_ids: HashMap<String, TextureId>,
-    next_resource_id: TextureId,
-    default_texture: Texture,
+    resources: HashMap<u32, Box<dyn Resource>>,
+    resource_ids: HashMap<String, ResourceId>,
+    next_resource_id: ResourceId,
+    pub default_texture: Texture,
 }
 
 impl Resources {
@@ -29,19 +30,15 @@ impl Resources {
     pub fn load_images(&mut self, images: Vec<PathBuf>) {
         for image in images {
             let name = image.file_name().unwrap().to_str().unwrap().to_string();
-            let id = self.resolve_texture_id(name);
+            let id = self.get_next_valid_id(name);
 
             let texture = Texture::new(image, id);
 
-            self.resources.insert(id, texture);
+            self.resources.insert(id, Box::new(texture));
         }
     }
 
-    pub fn resolve_texture_id(&mut self, name: String) -> TextureId {
-        if let Some(id) = self.resource_ids.get(&name) {
-            return *id;
-        }
-
+    pub fn get_next_valid_id(&mut self, name: String) -> ResourceId {
         let id = self.next_resource_id;
 
         self.resource_ids.insert(name, id);
@@ -49,12 +46,22 @@ impl Resources {
         id
     }
 
-    pub fn get(&mut self, name: String) -> &Texture {
-        let id = self.resolve_texture_id(name);
-        &self.resources.get(&id).unwrap_or(&self.default_texture)
+    pub fn get<T: 'static>(&mut self, name: String) -> Option<&T> {
+        let id = match self.resource_ids.get(&name) {
+            Some(id) => id,
+            None => return None,
+        };
+
+        match self.resources.get(&id) {
+            Some(v) => v.downcast_ref::<T>(),
+            None => None,
+        }
     }
 
-    pub fn get_by_id(&self, id: TextureId) -> &Texture {
-        &self.resources.get(&id).unwrap_or(&self.default_texture)
+    pub fn get_by_id<T: 'static>(&self, id: ResourceId) -> Option<&T> {
+        match self.resources.get(&id) {
+            Some(v) => v.downcast_ref::<T>(),
+            None => None,
+        }
     }
 }

@@ -13,6 +13,7 @@ pub use engine::input;
 pub use engine::Application;
 pub use resources::Resources;
 pub use sprite::Sprite;
+pub use texture::Texture;
 
 pub struct Time {
     pub elapsed: Duration,

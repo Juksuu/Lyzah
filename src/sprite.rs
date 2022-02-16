@@ -1,6 +1,6 @@
 use crate::{
     renderer::instance::{Instance, InstanceRaw},
-    resources::TextureId,
+    resources::ResourceId,
     texture::Texture,
 };
 use cgmath::*;
@@ -9,7 +9,7 @@ use wgpu::Extent3d;
 #[readonly::make]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sprite {
-    pub texture_id: TextureId,
+    pub texture_id: ResourceId,
     #[readonly]
     pub rotation: f32,
     #[readonly]
@@ -19,115 +19,62 @@ pub struct Sprite {
     #[readonly]
     pub anchor: Point2<f32>,
 
-    texture_size: Extent3d,
     instance: Instance,
-    instance_raw: InstanceRaw,
 }
 
 impl Sprite {
-    pub fn new(texture: &Texture) -> Self {
+    pub fn new(texture: Option<&Texture>) -> Self {
         let rotation = 0.0;
         let position = point2(0.0, 0.0);
         let scale = point2(1.0, 1.0);
         let anchor = point2(0.0, 0.0);
 
-        let (instance, instance_raw) =
-            update_instance(&anchor, &position, &scale, rotation, &texture.size);
+        let texture_id = match texture {
+            Some(t) => t.id,
+            None => 0,
+        };
 
         Sprite {
             scale,
             anchor,
-            texture_id: texture.id,
-            texture_size: texture.size,
+            texture_id,
             position,
             rotation,
-            instance,
-            instance_raw,
+            instance: Instance::default(),
         }
-    }
-
-    pub(crate) fn get_raw_instance(&self) -> InstanceRaw {
-        self.instance_raw
     }
 
     pub fn set_scale(&mut self, x: f32, y: f32) {
         self.scale.x = x;
         self.scale.y = y;
 
-        (self.instance, self.instance_raw) = update_instance(
-            &self.anchor,
-            &self.position,
-            &self.scale,
-            self.rotation,
-            &self.texture_size,
-        );
+        self.instance.scale.x = self.scale.x;
+        self.instance.scale.y = self.scale.y;
     }
 
     pub fn set_position(&mut self, x: f32, y: f32) {
         self.position.x = x;
         self.position.y = y;
 
-        (self.instance, self.instance_raw) = update_instance(
-            &self.anchor,
-            &self.position,
-            &self.scale,
-            self.rotation,
-            &self.texture_size,
-        );
+        self.instance.position.x = self.position.x;
+        self.instance.position.y = self.position.y;
     }
 
     pub fn set_rotation(&mut self, rotation: f32) {
         self.rotation = rotation;
 
-        (self.instance, self.instance_raw) = update_instance(
-            &self.anchor,
-            &self.position,
-            &self.scale,
-            self.rotation,
-            &self.texture_size,
-        );
+        self.instance.rotation = Quaternion::from_angle_z(cgmath::Rad(self.rotation));
     }
 
     pub fn set_anchor(&mut self, x: f32, y: f32) {
         self.anchor.x = x;
         self.anchor.y = y;
 
-        (self.instance, self.instance_raw) = update_instance(
-            &self.anchor,
-            &self.position,
-            &self.scale,
-            self.rotation,
-            &self.texture_size,
-        );
+        self.instance.anchor.x = self.anchor.x;
+        self.instance.anchor.y = self.anchor.y;
     }
-}
 
-fn update_instance(
-    anchor: &Point2<f32>,
-    position: &Point2<f32>,
-    scale: &Point2<f32>,
-    rotation: f32,
-    size: &wgpu::Extent3d,
-) -> (Instance, InstanceRaw) {
-    let instance = Instance {
-        anchor: Vector3 {
-            x: anchor.x,
-            y: anchor.y,
-            z: 0.0,
-        },
-        position: Vector3 {
-            x: position.x,
-            y: position.y,
-            z: 0.0,
-        },
-        scale: Vector3 {
-            x: scale.x,
-            y: scale.y,
-            z: 1.0,
-        },
-        rotation: Quaternion::from_angle_z(cgmath::Rad(rotation)),
-    };
-    let instance_raw = instance.to_raw(size);
-
-    (instance, instance_raw)
+    pub(crate) fn get_raw_instance(&self, size: &Extent3d) -> InstanceRaw {
+        self.instance.to_raw(size)
+    }
 }

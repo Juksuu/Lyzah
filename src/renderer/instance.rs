@@ -1,5 +1,7 @@
 use std::mem;
 
+use cgmath::Zero;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Instance {
     pub scale: cgmath::Vector3<f32>,
@@ -9,6 +11,26 @@ pub(crate) struct Instance {
 }
 
 impl Instance {
+    pub fn default() -> Self {
+        Self {
+            scale: cgmath::Vector3 {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            },
+            anchor: cgmath::Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            position: cgmath::Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            rotation: cgmath::Quaternion::zero(),
+        }
+    }
     pub fn to_raw(&self, size: &wgpu::Extent3d) -> InstanceRaw {
         let matrix = cgmath::Matrix4::from_translation(self.position)
             * cgmath::Matrix4::from(self.rotation)

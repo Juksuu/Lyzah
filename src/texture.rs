@@ -1,12 +1,12 @@
 use crate::renderer::vertex::Vertex;
-use crate::resources::TextureId;
+use crate::resources::ResourceId;
 use image::{DynamicImage, GenericImageView};
 use std::fs;
 use std::path::PathBuf;
 
 pub struct Texture {
     pub name: String,
-    pub id: TextureId,
+    pub id: ResourceId,
     pub size: wgpu::Extent3d,
     pub image: image::DynamicImage,
     pub vertices: Vec<Vertex>,
@@ -14,7 +14,7 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(path: PathBuf, id: TextureId) -> Self {
+    pub fn new(path: PathBuf, id: ResourceId) -> Self {
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
         let bytes = fs::read(path).unwrap();
         let image = image::load_from_memory(&bytes).unwrap();
@@ -39,7 +39,7 @@ impl Texture {
         }
     }
 
-    pub fn from_image(name: &str, image: DynamicImage, id: TextureId) -> Self {
+    pub fn from_image(name: &str, image: DynamicImage, id: ResourceId) -> Self {
         let dimensions = image.dimensions();
 
         let size = wgpu::Extent3d {
