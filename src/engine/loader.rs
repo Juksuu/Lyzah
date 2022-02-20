@@ -5,21 +5,21 @@ use std::{collections::HashMap, path::PathBuf};
 
 pub type ResourceId = u32;
 
-pub struct Resources {
+pub struct Loader {
     resources: HashMap<u32, Box<dyn Resource>>,
     resource_ids: HashMap<String, ResourceId>,
     next_resource_id: ResourceId,
     pub default_texture: Texture,
 }
 
-impl Resources {
+impl Loader {
     pub fn new() -> Self {
         let white_img = DynamicImage::ImageLuma8(ImageBuffer::from_fn(100, 100, |_x, _y| {
             image::Luma([255_u8])
         }));
         let white_box = Texture::from_image("white", white_img, 0);
 
-        Resources {
+        Loader {
             resources: HashMap::new(),
             resource_ids: HashMap::new(),
             default_texture: white_box,

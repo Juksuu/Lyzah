@@ -3,7 +3,7 @@ pub(crate) mod vertex;
 
 use self::vertex::Vertex;
 
-use crate::{texture, Resources, Sprite};
+use crate::{loader::Loader, texture, Sprite};
 use image::{GenericImageView, ImageBuffer, Rgba};
 use legion::*;
 use std::{collections::HashMap, fs, iter::once, num::NonZeroU32, path::Path};
@@ -159,7 +159,7 @@ impl Renderer {
     pub fn render(
         &mut self,
         world: &legion::World,
-        resources: &mut Resources,
+        resources: &mut Loader,
         camera_bind_group: &BindGroup,
     ) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;

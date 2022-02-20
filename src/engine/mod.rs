@@ -1,12 +1,15 @@
 pub mod input;
+pub mod loader;
 
-use crate::{engine::input::Input, renderer::Renderer, Camera2D, Resources, Time};
+use crate::{engine::input::Input, renderer::Renderer, Camera2D, Time};
 use std::time::Instant;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
+
+use self::loader::Loader;
 
 pub struct Application {
     event_loop: EventLoop<()>,
@@ -15,7 +18,7 @@ pub struct Application {
     start_time: Instant,
     last_render_time: Instant,
     renderer: Renderer,
-    pub resources: Resources,
+    pub loader: Loader,
 }
 
 impl Application {
@@ -26,14 +29,14 @@ impl Application {
         let renderer = pollster::block_on(Renderer::new(&window));
         let default_camera = Camera2D::new(&renderer);
 
-        let resources = Resources::new();
+        let loader = Loader::new();
         let start_time = Instant::now();
         let last_render_time = start_time;
 
         Self {
             window,
             renderer,
-            resources,
+            loader,
             start_time,
             event_loop,
             default_camera,
@@ -65,7 +68,7 @@ impl Application {
 
                     match self.renderer.render(
                         &world,
-                        &mut self.resources,
+                        &mut self.loader,
                         &self.default_camera.bind_group,
                     ) {
                         Ok(_) => {}

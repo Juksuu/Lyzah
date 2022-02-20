@@ -1,6 +1,6 @@
 use crate::{
+    loader::ResourceId,
     renderer::instance::{Instance, InstanceRaw},
-    resources::ResourceId,
     texture::Texture,
 };
 use cgmath::*;
