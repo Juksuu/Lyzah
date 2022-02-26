@@ -21,8 +21,8 @@ pub struct Input {
     pub modifiers_state: ModifiersState,
 }
 
-impl Input {
-    pub(crate) fn default() -> Self {
+impl Default for Input {
+    fn default() -> Self {
         Input {
             is_focused: false,
             is_mouse_inside_window: false,
@@ -38,7 +38,9 @@ impl Input {
             modifiers_state: ModifiersState::default(),
         }
     }
+}
 
+impl Input {
     pub(crate) fn reset_mouse_delta(&mut self) {
         self.mouse_delta.x = 0.0;
         self.mouse_delta.y = 0.0;

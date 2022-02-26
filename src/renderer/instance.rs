@@ -10,8 +10,8 @@ pub(crate) struct Instance {
     pub rotation: cgmath::Quaternion<f32>,
 }
 
-impl Instance {
-    pub fn default() -> Self {
+impl Default for Instance {
+    fn default() -> Self {
         Self {
             scale: cgmath::Vector3 {
                 x: 1.0,
@@ -31,6 +31,9 @@ impl Instance {
             rotation: cgmath::Quaternion::zero(),
         }
     }
+}
+
+impl Instance {
     pub fn to_raw(&self, size: &wgpu::Extent3d) -> InstanceRaw {
         let matrix = cgmath::Matrix4::from_translation(self.position)
             * cgmath::Matrix4::from(self.rotation)
