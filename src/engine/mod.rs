@@ -1,15 +1,15 @@
 pub mod input;
 pub mod loader;
+pub mod window;
 
 use std::time::Instant;
 
-use self::loader::Loader;
+use self::{loader::Loader, window::Window};
 use crate::{engine::input::Input, renderer::Renderer, Camera2D, Time};
 use legion::{systems::ParallelRunnable, Resources, Schedule, World};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
 };
 
 pub struct AppBuilder {
@@ -58,9 +58,9 @@ impl Application {
 
     pub(crate) fn new(schedule: Schedule) -> Self {
         let event_loop = EventLoop::new();
-        let window = WindowBuilder::new().build(&event_loop).unwrap();
+        let window = Window::new(&event_loop);
 
-        let renderer = pollster::block_on(Renderer::new(&window));
+        let renderer = pollster::block_on(Renderer::new(&window.winit_window));
         let default_camera = Camera2D::new(&renderer);
 
         let loader = Loader::new();
@@ -94,7 +94,14 @@ impl Application {
         println!("Starting application");
 
         self.event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Poll;
+            {
+                let window = self.resources.get::<Window>().unwrap();
+                if window.should_quit() {
+                    *control_flow = ControlFlow::Exit;
+                } else {
+                    *control_flow = ControlFlow::Poll;
+                }
+            }
             match event {
                 Event::RedrawRequested(..) => {
                     {
@@ -132,7 +139,7 @@ impl Application {
                 }
                 Event::MainEventsCleared => {
                     let window = self.resources.get::<Window>().unwrap();
-                    window.request_redraw();
+                    window.winit_window.request_redraw();
                 }
                 Event::DeviceEvent { ref event, .. } => {
                     let mut input = self.resources.get_mut::<Input>().unwrap();
@@ -146,7 +153,7 @@ impl Application {
                         }
                         WindowEvent::CursorMoved { position, .. } => {
                             let window = self.resources.get::<Window>().unwrap();
-                            input.update_mouse_pos(*position, window.inner_size())
+                            input.update_mouse_pos(*position, window.winit_window.inner_size())
                         }
                         WindowEvent::Focused(is_focused) => input.set_focused(*is_focused),
                         WindowEvent::CursorEntered { .. } => input.set_mouse_inside_window(true),
