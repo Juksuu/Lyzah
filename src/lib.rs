@@ -13,6 +13,7 @@ pub use engine::loader;
 pub use engine::Application;
 pub use sprite::Sprite;
 pub use texture::Texture;
+pub use winit::window::Window;
 
 #[derive(Default)]
 pub struct Time {

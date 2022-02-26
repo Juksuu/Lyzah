@@ -25,13 +25,6 @@ impl Default for AppBuilder {
 }
 
 impl AppBuilder {
-    pub fn with_systems<T: ParallelRunnable + 'static>(mut self, systems: Vec<T>) -> Self {
-        for system in systems {
-            self.schedule_builder.add_system(system);
-        }
-        self
-    }
-
     pub fn with_system<T: ParallelRunnable + 'static>(mut self, system: T) -> Self {
         self.schedule_builder.add_system(system);
         self
@@ -43,7 +36,6 @@ impl AppBuilder {
 }
 
 pub struct Application {
-    window: Window,
     event_loop: EventLoop<()>,
     default_camera: Camera2D,
 
@@ -76,11 +68,17 @@ impl Application {
         let last_render_time = start_time;
 
         let world = World::default();
-        let resources = Resources::default();
+        let mut resources = Resources::default();
+
+        let time = Time::default();
+        let input = Input::default();
+
+        resources.insert(time);
+        resources.insert(input);
+        resources.insert(window);
 
         Self {
             world,
-            window,
             loader,
             renderer,
             schedule,
@@ -95,16 +93,10 @@ impl Application {
     pub fn run(mut self) {
         println!("Starting application");
 
-        let time = Time::default();
-        let input = Input::default();
-
-        self.resources.insert(time);
-        self.resources.insert(input);
-
         self.event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
             match event {
-                Event::RedrawRequested(window_id) if window_id == self.window.id() => {
+                Event::RedrawRequested(..) => {
                     {
                         self.schedule.execute(&mut self.world, &mut self.resources);
                     }
@@ -139,51 +131,46 @@ impl Application {
                     }
                 }
                 Event::MainEventsCleared => {
-                    self.window.request_redraw();
+                    let window = self.resources.get::<Window>().unwrap();
+                    window.request_redraw();
                 }
                 Event::DeviceEvent { ref event, .. } => {
                     let mut input = self.resources.get_mut::<Input>().unwrap();
                     input.process_device_event(event);
                 }
-                Event::WindowEvent {
-                    ref event,
-                    window_id,
-                } => {
-                    if window_id == self.window.id() {
-                        let mut input = self.resources.get_mut::<Input>().unwrap();
-                        match event {
-                            WindowEvent::ModifiersChanged(modifiers_state) => {
-                                input.update_modifiers_state(*modifiers_state)
-                            }
-                            WindowEvent::CursorMoved { position, .. } => {
-                                input.update_mouse_pos(*position, self.window.inner_size())
-                            }
-                            WindowEvent::Focused(is_focused) => input.set_focused(*is_focused),
-                            WindowEvent::CursorEntered { .. } => {
-                                input.set_mouse_inside_window(true)
-                            }
-                            WindowEvent::CursorLeft { .. } => input.set_mouse_inside_window(false),
-                            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                            WindowEvent::Resized(physical_size) => {
-                                let new_size = *physical_size;
-                                self.default_camera.resize(
-                                    new_size.width,
-                                    new_size.height,
-                                    &self.renderer,
-                                );
-                                self.renderer.resize(Some(new_size))
-                            }
-                            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                                let new_size = **new_inner_size;
-                                self.default_camera.resize(
-                                    new_size.width,
-                                    new_size.height,
-                                    &self.renderer,
-                                );
-                                self.renderer.resize(Some(new_size))
-                            }
-                            _ => {}
+                Event::WindowEvent { ref event, .. } => {
+                    let mut input = self.resources.get_mut::<Input>().unwrap();
+                    match event {
+                        WindowEvent::ModifiersChanged(modifiers_state) => {
+                            input.update_modifiers_state(*modifiers_state)
                         }
+                        WindowEvent::CursorMoved { position, .. } => {
+                            let window = self.resources.get::<Window>().unwrap();
+                            input.update_mouse_pos(*position, window.inner_size())
+                        }
+                        WindowEvent::Focused(is_focused) => input.set_focused(*is_focused),
+                        WindowEvent::CursorEntered { .. } => input.set_mouse_inside_window(true),
+                        WindowEvent::CursorLeft { .. } => input.set_mouse_inside_window(false),
+                        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                        WindowEvent::Resized(physical_size) => {
+                            let new_size = *physical_size;
+                            self.default_camera.resize(
+                                new_size.width,
+                                new_size.height,
+                                &self.renderer,
+                            );
+                            self.renderer.resize(Some(new_size))
+                        }
+                        WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                            let new_size = **new_inner_size;
+                            self.default_camera.resize(
+                                new_size.width,
+                                new_size.height,
+                                &self.renderer,
+                            );
+                            self.renderer.resize(Some(new_size))
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}
