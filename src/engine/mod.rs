@@ -108,8 +108,11 @@ impl Application {
                         self.schedule.execute(&mut self.world, &mut self.resources);
                     }
 
+                    let mut time = self.resources.get_mut::<Time>().unwrap();
+
                     match self.renderer.render(
                         &self.world,
+                        &time,
                         &mut self.loader,
                         &self.default_camera.bind_group,
                     ) {
@@ -125,17 +128,13 @@ impl Application {
                     let elapsed = now - self.start_time;
                     self.last_render_time = now;
 
-                    {
-                        let mut time = self.resources.get_mut::<Time>().unwrap();
-                        time.elapsed = elapsed;
-                        time.delta_time = dt;
-                    }
+                    time.elapsed = elapsed;
+                    time.delta_time = dt;
+                    time.frames += 1;
 
                     // Reset mouse delta after current update loop
-                    {
-                        let mut input = self.resources.get_mut::<Input>().unwrap();
-                        input.reset_mouse_delta();
-                    }
+                    let mut input = self.resources.get_mut::<Input>().unwrap();
+                    input.reset_mouse_delta();
                 }
                 Event::MainEventsCleared => {
                     let window = self.resources.get::<Window>().unwrap();

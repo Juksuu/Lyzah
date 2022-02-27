@@ -3,7 +3,7 @@ pub(crate) mod vertex;
 
 use self::vertex::Vertex;
 
-use crate::{loader::Loader, texture, Sprite};
+use crate::{loader::Loader, texture, Sprite, Time};
 use image::{GenericImageView, ImageBuffer, Rgba};
 use legion::*;
 use std::{collections::HashMap, iter::once, num::NonZeroU32};
@@ -172,6 +172,7 @@ impl Renderer {
     pub fn render(
         &mut self,
         world: &legion::World,
+        time: &Time,
         resources: &mut Loader,
         camera_bind_group: &BindGroup,
     ) -> Result<(), SurfaceError> {
@@ -287,31 +288,44 @@ impl Renderer {
             }
         }
 
-        // Text stuff
+        // debug stuff
         {
-            let mut glyph_brush = GlyphBrushBuilder::using_font(&self.default_font)
-                .build(&self.device, TextureFormat::Bgra8UnormSrgb);
+            if time.frames != 0 {
+                let mut glyph_brush = GlyphBrushBuilder::using_font(&self.default_font)
+                    .build(&self.device, TextureFormat::Bgra8UnormSrgb);
 
-            glyph_brush.queue(Section {
-                screen_position: (30.0, 90.0),
-                bounds: (self.config.width as f32, self.config.height as f32),
-                text: vec![Text::new("Hello wgpu_glyph!")
-                    .with_color([1.0, 1.0, 1.0, 1.0])
-                    .with_scale(40.0)],
-                ..Section::default()
-            });
+                let fps = 1.0 / time.delta_time.as_secs_f32();
+                glyph_brush.queue(Section {
+                    screen_position: (20.0, 10.0),
+                    bounds: (self.config.width as f32, self.config.height as f32),
+                    text: vec![Text::new(&format!("{:.0} fps", fps))
+                        .with_color([1.0, 1.0, 1.0, 1.0])
+                        .with_scale(20.0)],
+                    ..Section::default()
+                });
 
-            // Draw the text!
-            glyph_brush
-                .draw_queued(
-                    &self.device,
-                    &mut self.staging_belt,
-                    &mut encoder,
-                    &view,
-                    self.config.width,
-                    self.config.height,
-                )
-                .expect("Draw queued");
+                let frame_time = time.delta_time.as_micros() as f32 / 1000.0;
+                glyph_brush.queue(Section {
+                    screen_position: (20.0, 25.0),
+                    bounds: (self.config.width as f32, self.config.height as f32),
+                    text: vec![Text::new(&format!("{:.2} ms", frame_time))
+                        .with_color([1.0, 1.0, 1.0, 1.0])
+                        .with_scale(20.0)],
+                    ..Section::default()
+                });
+
+                // Draw the text!
+                glyph_brush
+                    .draw_queued(
+                        &self.device,
+                        &mut self.staging_belt,
+                        &mut encoder,
+                        &view,
+                        self.config.width,
+                        self.config.height,
+                    )
+                    .expect("Draw queued");
+            }
         }
 
         self.staging_belt.finish();

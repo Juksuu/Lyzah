@@ -19,4 +19,5 @@ pub use texture::Texture;
 pub struct Time {
     pub elapsed: Duration,
     pub delta_time: Duration,
+    pub frames: u32,
 }
