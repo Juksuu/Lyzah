@@ -6,8 +6,12 @@ use self::vertex::Vertex;
 use crate::{loader::Loader, texture, Sprite};
 use image::{GenericImageView, ImageBuffer, Rgba};
 use legion::*;
-use std::{collections::HashMap, fs, iter::once, num::NonZeroU32, path::Path};
+use std::{collections::HashMap, iter::once, num::NonZeroU32};
 use wgpu::*;
+use wgpu_glyph::{
+    ab_glyph::{self, FontArc},
+    GlyphBrushBuilder, Section, Text,
+};
 use winit::{dpi::PhysicalSize, window::Window};
 
 pub(crate) struct TextureData {
@@ -27,7 +31,9 @@ pub(crate) struct Renderer {
     device: Device,
     queue: Queue,
     config: SurfaceConfiguration,
+    default_font: FontArc,
     clear_color: Color,
+    staging_belt: util::StagingBelt,
     render_pipeline: RenderPipeline,
     render_data: HashMap<String, RenderData>,
     instance_buffers: HashMap<String, Buffer>,
@@ -65,7 +71,7 @@ impl Renderer {
             format: surface.get_preferred_format(&adapter).unwrap(),
             width: size.width,
             height: size.height,
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode: wgpu::PresentMode::Immediate,
         };
         surface.configure(&device, &config);
 
@@ -114,12 +120,11 @@ impl Renderer {
                 push_constant_ranges: &[],
             });
 
-            let shader_path = Path::new(env!("OUT_DIR")).join("shaders");
-            let shader_data =
-                fs::read_to_string(shader_path.join("default.wgsl").as_path()).unwrap();
             let shader = wgpu::ShaderModuleDescriptor {
                 label: Some("Shader"),
-                source: wgpu::ShaderSource::Wgsl(shader_data.into()),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                    "../../resources/default.wgsl"
+                ))),
             };
 
             create_render_pipeline(
@@ -132,11 +137,19 @@ impl Renderer {
             )
         };
 
+        let default_font = ab_glyph::FontArc::try_from_slice(include_bytes!(
+            "../../resources/Inconsolata-Regular.ttf"
+        ))
+        .unwrap();
+        let staging_belt = util::StagingBelt::new(1024);
+
         Self {
             surface,
             device,
             queue,
             config,
+            default_font,
+            staging_belt,
             render_pipeline,
             clear_color: Color::BLACK,
             render_data: HashMap::new(),
@@ -192,57 +205,58 @@ impl Renderer {
 
             render_pass.set_pipeline(&self.render_pipeline);
 
-            // you define a query be declaring what components you want to find, and how you will access them
-            let mut query = <&Sprite>::query();
+            // Sprite handling
+            {
+                let mut query = <&Sprite>::query();
 
-            // you can then iterate through the components found in the world
-            let sprites: Vec<_> = query.iter(world).collect();
+                let sprites: Vec<_> = query.iter(world).collect();
 
-            for sprite in sprites {
-                let texture = resources
-                    .get_by_id::<texture::Texture>(sprite.texture_id)
-                    .unwrap_or(&resources.default_texture);
+                for sprite in sprites {
+                    let texture = resources
+                        .get_by_id::<texture::Texture>(sprite.texture_id)
+                        .unwrap_or(&resources.default_texture);
 
-                match self.render_data.get_mut(&texture.name) {
-                    Some(data) => {
-                        data.instances.push(sprite.get_raw_instance(&texture.size));
-                    }
-                    None => {
-                        let rgba = texture.image.to_rgba8();
-                        let dimensions = texture.image.dimensions();
-                        let bind_group = self.create_texture_bind_group(
-                            &texture.name,
-                            texture.size,
-                            &rgba,
-                            dimensions,
-                        );
+                    match self.render_data.get_mut(&texture.name) {
+                        Some(data) => {
+                            data.instances.push(sprite.get_raw_instance(&texture.size));
+                        }
+                        None => {
+                            let rgba = texture.image.to_rgba8();
+                            let dimensions = texture.image.dimensions();
+                            let bind_group = self.create_texture_bind_group(
+                                &texture.name,
+                                texture.size,
+                                &rgba,
+                                dimensions,
+                            );
 
-                        let vertex_buffer = self.create_buffer(
-                            "vertex_buffer",
-                            texture.vertices.as_slice(),
-                            BufferUsages::VERTEX,
-                        );
-                        let index_buffer = self.create_buffer(
-                            "index_buffer",
-                            texture.indices.as_slice(),
-                            BufferUsages::INDEX,
-                        );
+                            let vertex_buffer = self.create_buffer(
+                                "vertex_buffer",
+                                texture.vertices.as_slice(),
+                                BufferUsages::VERTEX,
+                            );
+                            let index_buffer = self.create_buffer(
+                                "index_buffer",
+                                texture.indices.as_slice(),
+                                BufferUsages::INDEX,
+                            );
 
-                        let mut instances = Vec::new();
-                        instances.push(sprite.get_raw_instance(&texture.size));
+                            let mut instances = Vec::new();
+                            instances.push(sprite.get_raw_instance(&texture.size));
 
-                        self.render_data.insert(
-                            texture.name.clone(),
-                            RenderData {
-                                texture_data: TextureData {
-                                    bind_group,
-                                    vertex_buffer,
-                                    index_buffer,
-                                    num_indices: texture.indices.len() as u32,
+                            self.render_data.insert(
+                                texture.name.clone(),
+                                RenderData {
+                                    texture_data: TextureData {
+                                        bind_group,
+                                        vertex_buffer,
+                                        index_buffer,
+                                        num_indices: texture.indices.len() as u32,
+                                    },
+                                    instances,
                                 },
-                                instances,
-                            },
-                        );
+                            );
+                        }
                     }
                 }
             }
@@ -273,6 +287,34 @@ impl Renderer {
             }
         }
 
+        // Text stuff
+        {
+            let mut glyph_brush = GlyphBrushBuilder::using_font(&self.default_font)
+                .build(&self.device, TextureFormat::Bgra8UnormSrgb);
+
+            glyph_brush.queue(Section {
+                screen_position: (30.0, 90.0),
+                bounds: (self.config.width as f32, self.config.height as f32),
+                text: vec![Text::new("Hello wgpu_glyph!")
+                    .with_color([1.0, 1.0, 1.0, 1.0])
+                    .with_scale(40.0)],
+                ..Section::default()
+            });
+
+            // Draw the text!
+            glyph_brush
+                .draw_queued(
+                    &self.device,
+                    &mut self.staging_belt,
+                    &mut encoder,
+                    &view,
+                    self.config.width,
+                    self.config.height,
+                )
+                .expect("Draw queued");
+        }
+
+        self.staging_belt.finish();
         self.queue.submit(once(encoder.finish()));
         output.present();
 

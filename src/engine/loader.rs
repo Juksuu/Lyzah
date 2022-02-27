@@ -12,6 +12,9 @@ pub struct Loader {
     pub default_texture: Texture,
 }
 
+unsafe impl Send for Loader {}
+unsafe impl Sync for Loader {}
+
 impl Loader {
     pub fn new() -> Self {
         let white_img = DynamicImage::ImageLuma8(ImageBuffer::from_fn(100, 100, |_x, _y| {
