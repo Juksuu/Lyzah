@@ -1,11 +1,16 @@
 use crate::texture::Texture;
 use image::{DynamicImage, ImageBuffer};
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, fs};
 
 pub type ResourceId = u32;
 
 enum Resource {
     Texture(Texture),
+}
+
+pub struct ResourceData<'a> {
+    pub name: &'a str,
+    pub path: &'a str,
 }
 
 pub struct Loader {
@@ -30,26 +35,32 @@ impl Loader {
         }
     }
 
-    pub fn load_images(&mut self, images: Vec<PathBuf>) {
-        for image in images {
-            let name = image.file_name().unwrap().to_str().unwrap().to_string();
-            let id = self.get_next_valid_id(name);
+    pub fn load_images(&mut self, resource_data: Vec<ResourceData>) {
+        for resource in resource_data {
+            let id = self.get_next_valid_id(resource.name);
 
-            self.resources
-                .insert(id, Resource::Texture(Texture::new(image, id)));
+            match fs::read(resource.path) {
+                Ok(bytes) => {
+                    self.resources.insert(
+                        id,
+                        Resource::Texture(Texture::new(resource.name, &bytes, id)),
+                    );
+                }
+                Err(err) => eprintln!("Error loading image {}. {}", resource.name, err),
+            }
         }
     }
 
-    pub fn get_next_valid_id(&mut self, name: String) -> ResourceId {
+    pub fn get_next_valid_id(&mut self, name: &str) -> ResourceId {
         let id = self.next_resource_id;
 
-        self.resource_ids.insert(name, id);
+        self.resource_ids.insert(name.to_string(), id);
         self.next_resource_id += 1;
         id
     }
 
-    pub fn get_texture_id(&self, name: String) -> ResourceId {
-        match self.resource_ids.get(&name) {
+    pub fn get_texture_id(&self, name: &str) -> ResourceId {
+        match self.resource_ids.get(name) {
             Some(id) => *id,
             None => 0,
         }

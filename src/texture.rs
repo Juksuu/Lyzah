@@ -1,8 +1,6 @@
 use crate::loader::ResourceId;
 use crate::renderer::vertex::Vertex;
 use image::{DynamicImage, GenericImageView};
-use std::fs;
-use std::path::PathBuf;
 
 pub struct Texture {
     pub name: String,
@@ -14,10 +12,8 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(path: PathBuf, id: ResourceId) -> Self {
-        let name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let bytes = fs::read(path).unwrap();
-        let image = image::load_from_memory(&bytes).unwrap();
+    pub fn new(name: &str, bytes: &Vec<u8>, id: ResourceId) -> Self {
+        let image = image::load_from_memory(bytes).unwrap();
 
         let dimensions = image.dimensions();
 
@@ -31,7 +27,7 @@ impl Texture {
 
         Texture {
             id,
-            name,
+            name: name.to_string(),
             size,
             image,
             vertices,
