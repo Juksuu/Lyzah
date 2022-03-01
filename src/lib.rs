@@ -15,6 +15,10 @@ pub use engine::Application;
 pub use sprite::Sprite;
 pub use texture::Texture;
 
+pub mod ecs {
+    pub use bevy_ecs::*;
+}
+
 #[derive(Default)]
 pub struct Time {
     pub elapsed: Duration,

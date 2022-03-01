@@ -1,4 +1,5 @@
 use crate::{
+    ecs::prelude::*,
     loader::ResourceId,
     renderer::instance::{Instance, InstanceRaw},
 };
@@ -6,7 +7,7 @@ use cgmath::*;
 use wgpu::Extent3d;
 
 #[readonly::make]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Component)]
 pub struct Sprite {
     pub texture_id: ResourceId,
     #[readonly]

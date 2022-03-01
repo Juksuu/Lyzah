@@ -3,9 +3,8 @@ pub(crate) mod vertex;
 
 use self::vertex::Vertex;
 
-use crate::{loader::Loader, Sprite, Time};
+use crate::{ecs::prelude::*, loader::Loader, Sprite, Time};
 use image::{GenericImageView, ImageBuffer, Rgba};
-use legion::*;
 use std::{collections::HashMap, iter::once, num::NonZeroU32};
 use wgpu::*;
 use wgpu_glyph::{
@@ -171,8 +170,7 @@ impl Renderer {
 
     pub fn render(
         &mut self,
-        world: &legion::World,
-        time: &Time,
+        world: &mut World,
         resources: &mut Loader,
         camera_bind_group: &BindGroup,
     ) -> Result<(), SurfaceError> {
@@ -208,11 +206,9 @@ impl Renderer {
 
             // Sprite handling
             {
-                let mut query = <&Sprite>::query();
+                let mut query = world.query::<&Sprite>();
 
-                let sprites: Vec<_> = query.iter(world).collect();
-
-                for sprite in sprites {
+                for sprite in query.iter(world) {
                     let texture = resources.get_texture_by_id(sprite.texture_id);
                     match self.render_data.get_mut(&texture.name) {
                         Some(data) => {
@@ -284,6 +280,8 @@ impl Renderer {
                 );
             }
         }
+
+        let time = world.get_resource::<Time>().unwrap();
 
         // debug stuff
         {
