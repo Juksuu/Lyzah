@@ -1,19 +1,19 @@
 use crate::texture::Texture;
 use image::{DynamicImage, ImageBuffer};
-use legion::systems::Resource;
 use std::{collections::HashMap, path::PathBuf};
 
 pub type ResourceId = u32;
 
+enum Resource {
+    Texture(Texture),
+}
+
 pub struct Loader {
-    resources: HashMap<u32, Box<dyn Resource>>,
+    resources: HashMap<ResourceId, Resource>,
     resource_ids: HashMap<String, ResourceId>,
     next_resource_id: ResourceId,
     pub default_texture: Texture,
 }
-
-unsafe impl Send for Loader {}
-unsafe impl Sync for Loader {}
 
 impl Loader {
     pub fn new() -> Self {
@@ -35,9 +35,8 @@ impl Loader {
             let name = image.file_name().unwrap().to_str().unwrap().to_string();
             let id = self.get_next_valid_id(name);
 
-            let texture = Texture::new(image, id);
-
-            self.resources.insert(id, Box::new(texture));
+            self.resources
+                .insert(id, Resource::Texture(Texture::new(image, id)));
         }
     }
 
@@ -49,22 +48,17 @@ impl Loader {
         id
     }
 
-    pub fn get<T: 'static>(&mut self, name: String) -> Option<&T> {
-        let id = match self.resource_ids.get(&name) {
-            Some(id) => id,
-            None => return None,
-        };
-
-        match self.resources.get(&id) {
-            Some(v) => v.downcast_ref::<T>(),
-            None => None,
+    pub fn get_texture_id(&self, name: String) -> ResourceId {
+        match self.resource_ids.get(&name) {
+            Some(id) => *id,
+            None => 0,
         }
     }
 
-    pub fn get_by_id<T: 'static>(&self, id: ResourceId) -> Option<&T> {
+    pub(crate) fn get_texture_by_id(&self, id: ResourceId) -> &Texture {
         match self.resources.get(&id) {
-            Some(v) => v.downcast_ref::<T>(),
-            None => None,
+            Some(Resource::Texture(v)) => v,
+            None => &self.default_texture,
         }
     }
 }

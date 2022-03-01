@@ -1,7 +1,6 @@
 use crate::{
     loader::ResourceId,
     renderer::instance::{Instance, InstanceRaw},
-    texture::Texture,
 };
 use cgmath::*;
 use wgpu::Extent3d;
@@ -23,16 +22,11 @@ pub struct Sprite {
 }
 
 impl Sprite {
-    pub fn new(texture: Option<&Texture>) -> Self {
+    pub fn new(texture_id: ResourceId) -> Self {
         let rotation = 0.0;
         let position = point2(0.0, 0.0);
         let scale = point2(1.0, 1.0);
         let anchor = point2(0.0, 0.0);
-
-        let texture_id = match texture {
-            Some(t) => t.id,
-            None => 0,
-        };
 
         Sprite {
             scale,

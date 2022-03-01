@@ -3,7 +3,7 @@ pub(crate) mod vertex;
 
 use self::vertex::Vertex;
 
-use crate::{loader::Loader, texture, Sprite, Time};
+use crate::{loader::Loader, Sprite, Time};
 use image::{GenericImageView, ImageBuffer, Rgba};
 use legion::*;
 use std::{collections::HashMap, iter::once, num::NonZeroU32};
@@ -213,10 +213,7 @@ impl Renderer {
                 let sprites: Vec<_> = query.iter(world).collect();
 
                 for sprite in sprites {
-                    let texture = resources
-                        .get_by_id::<texture::Texture>(sprite.texture_id)
-                        .unwrap_or(&resources.default_texture);
-
+                    let texture = resources.get_texture_by_id(sprite.texture_id);
                     match self.render_data.get_mut(&texture.name) {
                         Some(data) => {
                             data.instances.push(sprite.get_raw_instance(&texture.size));
