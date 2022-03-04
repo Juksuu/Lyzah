@@ -3,8 +3,8 @@ pub(crate) mod vertex;
 
 use self::vertex::Vertex;
 
-use crate::{ecs::prelude::*, loader::Loader, Sprite, Time};
-use image::{GenericImageView, ImageBuffer, Rgba};
+use crate::{ecs::prelude::*, loader::Loader, texture, Sprite, Time};
+use image::GenericImageView;
 use std::{collections::HashMap, iter::once, num::NonZeroU32};
 use wgpu::*;
 use wgpu_glyph::{
@@ -73,6 +73,8 @@ impl Renderer {
             present_mode: wgpu::PresentMode::Immediate,
         };
         surface.configure(&device, &config);
+
+        println!("Config format, {:?}", config.format);
 
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -150,7 +152,7 @@ impl Renderer {
             default_font,
             staging_belt,
             render_pipeline,
-            clear_color: Color::BLACK,
+            clear_color: Color::BLUE,
             render_data: HashMap::new(),
             instance_buffers: HashMap::new(),
         }
@@ -215,14 +217,7 @@ impl Renderer {
                             data.instances.push(sprite.get_raw_instance(&texture.size));
                         }
                         None => {
-                            let rgba = texture.image.to_rgba8();
-                            let dimensions = texture.image.dimensions();
-                            let bind_group = self.create_texture_bind_group(
-                                &texture.name,
-                                texture.size,
-                                &rgba,
-                                dimensions,
-                            );
+                            let bind_group = self.create_texture_bind_group(&texture);
 
                             let vertex_buffer = self.create_buffer(
                                 "vertex_buffer",
@@ -341,22 +336,18 @@ impl Renderer {
         })
     }
 
-    pub fn create_texture_bind_group(
-        &self,
-        name: &str,
-        texture_size: wgpu::Extent3d,
-        rgba: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-        dimension: (u32, u32),
-    ) -> BindGroup {
+    pub fn create_texture_bind_group(&self, tex: &texture::Texture) -> BindGroup {
         let texture = self.device.create_texture(&TextureDescriptor {
-            size: texture_size,
+            size: tex.size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8UnormSrgb,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            label: Some(name),
+            label: Some(&tex.name),
+            format: TextureFormat::Rgba8UnormSrgb,
         });
+
+        let dimension = tex.image.dimensions();
 
         self.queue.write_texture(
             ImageCopyTexture {
@@ -365,13 +356,13 @@ impl Renderer {
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            rgba,
+            &tex.image.to_rgba8(),
             ImageDataLayout {
                 offset: 0,
                 bytes_per_row: NonZeroU32::new(4 * dimension.0),
                 rows_per_image: NonZeroU32::new(dimension.1),
             },
-            texture_size,
+            tex.size,
         );
 
         let texture_view = texture.create_view(&TextureViewDescriptor::default());
@@ -397,7 +388,7 @@ impl Renderer {
                     resource: BindingResource::Sampler(&sampler),
                 },
             ],
-            label: Some(name),
+            label: Some(&tex.name),
         })
     }
 
@@ -447,7 +438,7 @@ fn create_render_pipeline(
             entry_point: "fs_main",
             targets: &[wgpu::ColorTargetState {
                 format: color_format,
-                blend: Some(wgpu::BlendState::REPLACE),
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             }],
         }),

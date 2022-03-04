@@ -12,8 +12,16 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(name: &str, bytes: &Vec<u8>, id: ResourceId) -> Self {
-        let image = image::load_from_memory(bytes).unwrap();
+    pub fn new(
+        id: ResourceId,
+        name: &str,
+        bytes: &Vec<u8>,
+        format: Option<image::ImageFormat>,
+    ) -> Self {
+        let image = match format {
+            Some(format) => image::load_from_memory_with_format(bytes, format).unwrap(),
+            None => image::load_from_memory(bytes).unwrap(),
+        };
 
         let dimensions = image.dimensions();
 

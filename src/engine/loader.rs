@@ -1,6 +1,6 @@
 use crate::texture::Texture;
 use image::{DynamicImage, ImageBuffer};
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, path::Path};
 
 pub type ResourceId = u32;
 
@@ -38,12 +38,18 @@ impl Loader {
     pub fn load_images(&mut self, resource_data: Vec<ResourceData>) {
         for resource in resource_data {
             let id = self.get_next_valid_id(resource.name);
+            let ext = Path::new(resource.path).extension().unwrap();
 
             match fs::read(resource.path) {
                 Ok(bytes) => {
                     self.resources.insert(
                         id,
-                        Resource::Texture(Texture::new(resource.name, &bytes, id)),
+                        Resource::Texture(Texture::new(
+                            id,
+                            resource.name,
+                            &bytes,
+                            image::ImageFormat::from_extension(ext),
+                        )),
                     );
                 }
                 Err(err) => eprintln!("Error loading image {}. {}", resource.name, err),
