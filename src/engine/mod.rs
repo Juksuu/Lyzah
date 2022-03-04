@@ -54,7 +54,6 @@ pub struct Application {
     last_render_time: Instant,
 
     pub world: World,
-    pub loader: Loader,
 }
 
 impl Application {
@@ -81,10 +80,10 @@ impl Application {
         world.insert_resource(time);
         world.insert_resource(input);
         world.insert_resource(window);
+        world.insert_resource(loader);
 
         Self {
             world,
-            loader,
             renderer,
             schedule,
             start_time,
@@ -110,11 +109,10 @@ impl Application {
                 Event::RedrawRequested(..) => {
                     self.schedule.run(&mut self.world);
 
-                    match self.renderer.render(
-                        &mut self.world,
-                        &mut self.loader,
-                        &self.default_camera.bind_group,
-                    ) {
+                    match self
+                        .renderer
+                        .render(&mut self.world, &self.default_camera.bind_group)
+                    {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost) => self.renderer.resize(None),
                         Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,

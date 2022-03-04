@@ -171,7 +171,6 @@ impl Renderer {
     pub fn render(
         &mut self,
         world: &mut World,
-        resources: &mut Loader,
         camera_bind_group: &BindGroup,
     ) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;
@@ -208,8 +207,9 @@ impl Renderer {
             {
                 let mut query = world.query::<&Sprite>();
 
+                let loader = world.get_resource::<Loader>().unwrap();
                 for sprite in query.iter(world) {
-                    let texture = resources.get_texture_by_id(sprite.texture_id);
+                    let texture = loader.get_texture_by_id(sprite.texture_id);
                     match self.render_data.get_mut(&texture.name) {
                         Some(data) => {
                             data.instances.push(sprite.get_raw_instance(&texture.size));
