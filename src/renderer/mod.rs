@@ -284,9 +284,19 @@ impl Renderer {
                 let mut glyph_brush = GlyphBrushBuilder::using_font(&self.default_font)
                     .build(&self.device, TextureFormat::Bgra8UnormSrgb);
 
-                let fps = 1.0 / time.delta_time.as_secs_f32();
+                let average_fps = 1.0 / (time.elapsed.as_secs_f32() / time.frames as f32);
                 glyph_brush.queue(Section {
                     screen_position: (20.0, 10.0),
+                    bounds: (self.config.width as f32, self.config.height as f32),
+                    text: vec![Text::new(&format!("{:.0} avg fps", average_fps))
+                        .with_color([1.0, 1.0, 1.0, 1.0])
+                        .with_scale(20.0)],
+                    ..Section::default()
+                });
+
+                let fps = 1.0 / time.delta_time.as_secs_f32();
+                glyph_brush.queue(Section {
+                    screen_position: (20.0, 40.0),
                     bounds: (self.config.width as f32, self.config.height as f32),
                     text: vec![Text::new(&format!("{:.0} fps", fps))
                         .with_color([1.0, 1.0, 1.0, 1.0])
@@ -296,7 +306,7 @@ impl Renderer {
 
                 let frame_time = time.delta_time.as_micros() as f32 / 1000.0;
                 glyph_brush.queue(Section {
-                    screen_position: (20.0, 25.0),
+                    screen_position: (20.0, 55.0),
                     bounds: (self.config.width as f32, self.config.height as f32),
                     text: vec![Text::new(&format!("{:.2} ms", frame_time))
                         .with_color([1.0, 1.0, 1.0, 1.0])
