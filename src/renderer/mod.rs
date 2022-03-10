@@ -3,9 +3,14 @@ pub(crate) mod vertex;
 
 use self::vertex::Vertex;
 
-use crate::{ecs::prelude::*, loader::Loader, texture, Sprite, Time};
+use crate::{
+    ecs::prelude::*,
+    loader::{Loader, ResourceId},
+    texture, Sprite, Time,
+};
 use image::GenericImageView;
-use std::{collections::HashMap, iter::once, num::NonZeroU32};
+use rayon_hash::HashMap;
+use std::{iter::once, num::NonZeroU32};
 use wgpu::*;
 use wgpu_glyph::{
     ab_glyph::{self, FontArc},
@@ -20,11 +25,6 @@ pub(crate) struct TextureData {
     num_indices: u32,
 }
 
-pub(crate) struct RenderData {
-    texture_data: TextureData,
-    instances: Vec<instance::InstanceRaw>,
-}
-
 pub(crate) struct Renderer {
     surface: Surface,
     device: Device,
@@ -34,8 +34,8 @@ pub(crate) struct Renderer {
     clear_color: Color,
     staging_belt: util::StagingBelt,
     render_pipeline: RenderPipeline,
-    render_data: HashMap<String, RenderData>,
-    instance_buffers: HashMap<String, Buffer>,
+    render_texture_data: HashMap<ResourceId, TextureData>,
+    instance_buffers: HashMap<ResourceId, Buffer>,
 }
 
 impl Renderer {
@@ -73,8 +73,6 @@ impl Renderer {
             present_mode: wgpu::PresentMode::Immediate,
         };
         surface.configure(&device, &config);
-
-        println!("Config format, {:?}", config.format);
 
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -153,7 +151,7 @@ impl Renderer {
             staging_belt,
             render_pipeline,
             clear_color: Color::BLUE,
-            render_data: HashMap::new(),
+            render_texture_data: HashMap::new(),
             instance_buffers: HashMap::new(),
         }
     }
@@ -186,7 +184,6 @@ impl Renderer {
                 label: Some("Render Encoder"),
             });
 
-        self.render_data.clear();
         self.instance_buffers.clear();
 
         {
@@ -205,6 +202,8 @@ impl Renderer {
 
             render_pass.set_pipeline(&self.render_pipeline);
 
+            let mut instances: HashMap<ResourceId, Vec<instance::InstanceRaw>> = HashMap::new();
+
             // Sprite handling
             {
                 let mut query = world.query::<&Sprite>();
@@ -212,67 +211,60 @@ impl Renderer {
                 let loader = world.get_resource::<Loader>().unwrap();
                 for sprite in query.iter(world) {
                     let texture = loader.get_texture_by_id(sprite.texture_id);
-                    match self.render_data.get_mut(&texture.name) {
+                    if !self.render_texture_data.contains_key(&texture.id) {
+                        let bind_group = self.create_texture_bind_group(&texture);
+
+                        let vertex_buffer = self.create_buffer(
+                            "vertex_buffer",
+                            texture.vertices.as_slice(),
+                            BufferUsages::VERTEX,
+                        );
+                        let index_buffer = self.create_buffer(
+                            "index_buffer",
+                            texture.indices.as_slice(),
+                            BufferUsages::INDEX,
+                        );
+
+                        let num_indices = texture.indices.len() as u32;
+
+                        self.render_texture_data.insert(
+                            texture.id,
+                            TextureData {
+                                bind_group,
+                                vertex_buffer,
+                                index_buffer,
+                                num_indices,
+                            },
+                        );
+                    }
+
+                    match instances.get_mut(&texture.id) {
                         Some(data) => {
-                            data.instances.push(sprite.get_raw_instance(&texture.size));
+                            data.push(sprite.get_raw_instance(&texture.size));
                         }
                         None => {
-                            let bind_group = self.create_texture_bind_group(&texture);
-
-                            let vertex_buffer = self.create_buffer(
-                                "vertex_buffer",
-                                texture.vertices.as_slice(),
-                                BufferUsages::VERTEX,
-                            );
-                            let index_buffer = self.create_buffer(
-                                "index_buffer",
-                                texture.indices.as_slice(),
-                                BufferUsages::INDEX,
-                            );
-
-                            let mut instances = Vec::new();
-                            instances.push(sprite.get_raw_instance(&texture.size));
-
-                            self.render_data.insert(
-                                texture.name.clone(),
-                                RenderData {
-                                    texture_data: TextureData {
-                                        bind_group,
-                                        vertex_buffer,
-                                        index_buffer,
-                                        num_indices: texture.indices.len() as u32,
-                                    },
-                                    instances,
-                                },
-                            );
+                            instances
+                                .insert(texture.id, vec![sprite.get_raw_instance(&texture.size)]);
                         }
                     }
                 }
             }
 
-            for (key, data) in self.render_data.iter() {
-                let instance_buffer = self.create_buffer(
-                    "Instance buffer",
-                    data.instances.as_slice(),
-                    BufferUsages::VERTEX,
-                );
+            for (key, data) in instances.iter() {
+                let instance_buffer =
+                    self.create_buffer("Instance buffer", data.as_slice(), BufferUsages::VERTEX);
                 self.instance_buffers.insert(key.clone(), instance_buffer);
             }
 
-            for (key, data) in self.render_data.iter() {
-                render_pass.set_bind_group(0, &data.texture_data.bind_group, &[]);
+            for (key, data) in self.instance_buffers.iter() {
+                let texture_data = self.render_texture_data.get(key).unwrap();
+                render_pass.set_bind_group(0, &texture_data.bind_group, &[]);
                 render_pass.set_bind_group(1, camera_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, data.texture_data.vertex_buffer.slice(..));
-                render_pass.set_vertex_buffer(1, self.instance_buffers.get(key).unwrap().slice(..));
-                render_pass.set_index_buffer(
-                    data.texture_data.index_buffer.slice(..),
-                    IndexFormat::Uint16,
-                );
-                render_pass.draw_indexed(
-                    0..data.texture_data.num_indices,
-                    0,
-                    0..data.instances.len() as u32,
-                );
+                render_pass.set_vertex_buffer(0, texture_data.vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, data.slice(..));
+                render_pass
+                    .set_index_buffer(texture_data.index_buffer.slice(..), IndexFormat::Uint16);
+                render_pass.draw_indexed(0..texture_data.num_indices, 0, 0..instances.len() as u32);
             }
         }
 
