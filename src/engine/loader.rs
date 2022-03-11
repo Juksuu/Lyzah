@@ -66,6 +66,19 @@ impl Loader {
         }
     }
 
+    pub fn load_fonts(&mut self, resource_data: Vec<ResourceData>) {
+        for resource in resource_data {
+            let id = self.get_next_valid_id(resource.name);
+            match fs::read(resource.path) {
+                Ok(bytes) => {
+                    self.resources
+                        .insert(id, Resource::Font(FontArc::try_from_vec(bytes).unwrap()));
+                }
+                Err(err) => eprintln!("Error loading font {}. {}", resource.name, err),
+            }
+        }
+    }
+
     pub fn get_next_valid_id(&mut self, name: &str) -> ResourceId {
         let id = self.next_resource_id;
 
@@ -74,7 +87,7 @@ impl Loader {
         id
     }
 
-    pub fn get_texture_id(&self, name: &str) -> ResourceId {
+    pub fn get_resource_id(&self, name: &str) -> ResourceId {
         match self.resource_ids.get(name) {
             Some(id) => *id,
             None => 0,

@@ -6,13 +6,13 @@ use self::vertex::Vertex;
 use crate::{
     ecs::prelude::*,
     loader::{Loader, Resource, ResourceId},
-    texture, Sprite, Time,
+    text, texture, Sprite, Time,
 };
 use image::GenericImageView;
 use rayon_hash::HashMap;
 use std::{iter::once, num::NonZeroU32};
 use wgpu::*;
-use wgpu_glyph::{GlyphBrushBuilder, Section, Text};
+use wgpu_glyph::{FontId, GlyphBrushBuilder, Section, Text};
 use winit::{dpi::PhysicalSize, window::Window};
 
 pub(crate) struct TextureData {
@@ -227,14 +227,14 @@ impl Renderer {
 
             render_pass.set_pipeline(&self.render_pipeline);
 
+            let mut sprite_query = world.query::<&Sprite>();
+
             let mut instances: HashMap<ResourceId, Vec<instance::InstanceRaw>> = HashMap::new();
 
             // Sprite handling
             {
-                let mut query = world.query::<&Sprite>();
-
                 let loader = world.get_resource::<Loader>().unwrap();
-                for sprite in query.iter(world) {
+                for sprite in sprite_query.iter(world) {
                     let texture = loader.get_texture_by_id(sprite.texture_id);
                     match instances.get_mut(&texture.id) {
                         Some(data) => {
@@ -266,15 +266,37 @@ impl Renderer {
             }
         }
 
-        let time = world.get_resource::<Time>().unwrap();
+        let mut text_query = world.query::<&text::Text>();
+        let loader = world.get_resource::<Loader>().unwrap();
+        let mut glyph_brush = GlyphBrushBuilder::using_font(loader.get_font_by_id(0))
+            .build(&self.device, TextureFormat::Bgra8UnormSrgb);
+
+        let used_fonts: HashMap<ResourceId, FontId> = HashMap::new();
+
+        // Text stuff
+        {
+            for text in text_query.iter(world) {
+                let id = match used_fonts.get(&text.font_id) {
+                    Some(i) => *i,
+                    None => glyph_brush.add_font(loader.get_font_by_id(text.font_id)),
+                };
+
+                glyph_brush.queue(Section {
+                    screen_position: (text.position.x, text.position.y),
+                    bounds: (self.config.width as f32, self.config.height as f32),
+                    text: vec![Text::new(&text.text)
+                        .with_font_id(id)
+                        .with_color([1.0, 1.0, 1.0, 1.0])
+                        .with_scale(text.font_size)],
+                    ..Section::default()
+                });
+            }
+        }
 
         // debug stuff
         {
+            let time = world.get_resource::<Time>().unwrap();
             if time.frames != 0 {
-                let loader = world.get_resource::<Loader>().unwrap();
-                let mut glyph_brush = GlyphBrushBuilder::using_font(loader.get_font_by_id(0))
-                    .build(&self.device, TextureFormat::Bgra8UnormSrgb);
-
                 let average_fps = 1.0 / (time.elapsed.as_secs_f32() / time.frames as f32);
                 glyph_brush.queue(Section {
                     screen_position: (20.0, 10.0),
@@ -304,20 +326,20 @@ impl Renderer {
                         .with_scale(20.0)],
                     ..Section::default()
                 });
-
-                // Draw the text!
-                glyph_brush
-                    .draw_queued(
-                        &self.device,
-                        &mut self.staging_belt,
-                        &mut encoder,
-                        &view,
-                        self.config.width,
-                        self.config.height,
-                    )
-                    .expect("Draw queued");
             }
         }
+
+        // Draw the texts
+        glyph_brush
+            .draw_queued(
+                &self.device,
+                &mut self.staging_belt,
+                &mut encoder,
+                &view,
+                self.config.width,
+                self.config.height,
+            )
+            .expect("Draw queued");
 
         self.staging_belt.finish();
         self.queue.submit(once(encoder.finish()));

@@ -5,6 +5,7 @@ mod renderer;
 
 mod camera;
 mod sprite;
+mod text;
 mod texture;
 
 pub use camera::Camera2D;
@@ -13,6 +14,7 @@ pub use engine::loader;
 pub use engine::window;
 pub use engine::Application;
 pub use sprite::Sprite;
+pub use text::Text;
 pub use texture::Texture;
 
 pub mod ecs {
