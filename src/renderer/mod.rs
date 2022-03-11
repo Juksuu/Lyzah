@@ -5,17 +5,14 @@ use self::vertex::Vertex;
 
 use crate::{
     ecs::prelude::*,
-    loader::{Loader, ResourceId},
+    loader::{Loader, Resource, ResourceId},
     texture, Sprite, Time,
 };
 use image::GenericImageView;
 use rayon_hash::HashMap;
 use std::{iter::once, num::NonZeroU32};
 use wgpu::*;
-use wgpu_glyph::{
-    ab_glyph::{self, FontArc},
-    GlyphBrushBuilder, Section, Text,
-};
+use wgpu_glyph::{GlyphBrushBuilder, Section, Text};
 use winit::{dpi::PhysicalSize, window::Window};
 
 pub(crate) struct TextureData {
@@ -30,7 +27,6 @@ pub(crate) struct Renderer {
     device: Device,
     queue: Queue,
     config: SurfaceConfiguration,
-    default_font: FontArc,
     clear_color: Color,
     staging_belt: util::StagingBelt,
     render_pipeline: RenderPipeline,
@@ -136,10 +132,6 @@ impl Renderer {
             )
         };
 
-        let default_font = ab_glyph::FontArc::try_from_slice(include_bytes!(
-            "../../resources/Inconsolata-Regular.ttf"
-        ))
-        .unwrap();
         let staging_belt = util::StagingBelt::new(1024);
 
         Self {
@@ -147,12 +139,45 @@ impl Renderer {
             device,
             queue,
             config,
-            default_font,
             staging_belt,
             render_pipeline,
             clear_color: Color::BLUE,
             render_texture_data: HashMap::new(),
             instance_buffers: HashMap::new(),
+        }
+    }
+
+    pub fn setup_resources(&mut self, resources: &HashMap<ResourceId, Resource>) {
+        for (key, data) in resources {
+            match data {
+                Resource::Texture(t) => {
+                    let bind_group = self.create_texture_bind_group(&t);
+
+                    let vertex_buffer = self.create_buffer(
+                        "vertex_buffer",
+                        t.vertices.as_slice(),
+                        BufferUsages::VERTEX,
+                    );
+                    let index_buffer = self.create_buffer(
+                        "index_buffer",
+                        t.indices.as_slice(),
+                        BufferUsages::INDEX,
+                    );
+
+                    let num_indices = t.indices.len() as u32;
+
+                    self.render_texture_data.insert(
+                        *key,
+                        TextureData {
+                            bind_group,
+                            vertex_buffer,
+                            index_buffer,
+                            num_indices,
+                        },
+                    );
+                }
+                _ => (),
+            }
         }
     }
 
@@ -211,33 +236,6 @@ impl Renderer {
                 let loader = world.get_resource::<Loader>().unwrap();
                 for sprite in query.iter(world) {
                     let texture = loader.get_texture_by_id(sprite.texture_id);
-                    if !self.render_texture_data.contains_key(&texture.id) {
-                        let bind_group = self.create_texture_bind_group(&texture);
-
-                        let vertex_buffer = self.create_buffer(
-                            "vertex_buffer",
-                            texture.vertices.as_slice(),
-                            BufferUsages::VERTEX,
-                        );
-                        let index_buffer = self.create_buffer(
-                            "index_buffer",
-                            texture.indices.as_slice(),
-                            BufferUsages::INDEX,
-                        );
-
-                        let num_indices = texture.indices.len() as u32;
-
-                        self.render_texture_data.insert(
-                            texture.id,
-                            TextureData {
-                                bind_group,
-                                vertex_buffer,
-                                index_buffer,
-                                num_indices,
-                            },
-                        );
-                    }
-
                     match instances.get_mut(&texture.id) {
                         Some(data) => {
                             data.push(sprite.get_raw_instance(&texture.size));
@@ -273,7 +271,8 @@ impl Renderer {
         // debug stuff
         {
             if time.frames != 0 {
-                let mut glyph_brush = GlyphBrushBuilder::using_font(&self.default_font)
+                let loader = world.get_resource::<Loader>().unwrap();
+                let mut glyph_brush = GlyphBrushBuilder::using_font(loader.get_font_by_id(0))
                     .build(&self.device, TextureFormat::Bgra8UnormSrgb);
 
                 let average_fps = 1.0 / (time.elapsed.as_secs_f32() / time.frames as f32);

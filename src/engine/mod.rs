@@ -96,6 +96,9 @@ impl Application {
     pub fn run(mut self) {
         println!("Starting application");
 
+        let loader = self.world.get_resource::<Loader>().unwrap();
+        self.renderer.setup_resources(loader.get_resources());
+
         self.event_loop.run(move |event, _, control_flow| {
             {
                 let window = self.world.get_resource::<Window>().unwrap();
