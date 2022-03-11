@@ -12,7 +12,7 @@ use image::GenericImageView;
 use rayon_hash::HashMap;
 use std::{iter::once, num::NonZeroU32};
 use wgpu::*;
-use wgpu_glyph::{FontId, GlyphBrushBuilder, Section, Text};
+use wgpu_glyph::{ab_glyph::FontArc, FontId, GlyphBrush, GlyphBrushBuilder, Section, Text};
 use winit::{dpi::PhysicalSize, window::Window};
 
 pub(crate) struct TextureData {
@@ -29,8 +29,10 @@ pub(crate) struct Renderer {
     config: SurfaceConfiguration,
     clear_color: Color,
     staging_belt: util::StagingBelt,
+    glyph_brush: GlyphBrush<()>,
     render_pipeline: RenderPipeline,
-    render_texture_data: HashMap<ResourceId, TextureData>,
+    texture_render_data: HashMap<ResourceId, TextureData>,
+    resource_id_to_font_id: HashMap<ResourceId, FontId>,
     instance_buffers: HashMap<ResourceId, Buffer>,
 }
 
@@ -133,6 +135,11 @@ impl Renderer {
         };
 
         let staging_belt = util::StagingBelt::new(1024);
+        let default_font =
+            FontArc::try_from_slice(include_bytes!("../../resources/Inconsolata-Regular.ttf"))
+                .unwrap();
+        let glyph_brush = GlyphBrushBuilder::using_font(default_font)
+            .build(&device, TextureFormat::Bgra8UnormSrgb);
 
         Self {
             surface,
@@ -140,10 +147,12 @@ impl Renderer {
             queue,
             config,
             staging_belt,
+            glyph_brush,
             render_pipeline,
             clear_color: Color::BLUE,
-            render_texture_data: HashMap::new(),
             instance_buffers: HashMap::new(),
+            texture_render_data: HashMap::new(),
+            resource_id_to_font_id: HashMap::new(),
         }
     }
 
@@ -166,7 +175,7 @@ impl Renderer {
 
                     let num_indices = t.indices.len() as u32;
 
-                    self.render_texture_data.insert(
+                    self.texture_render_data.insert(
                         *key,
                         TextureData {
                             bind_group,
@@ -176,7 +185,11 @@ impl Renderer {
                         },
                     );
                 }
-                _ => (),
+                Resource::Font(f) => {
+                    let font = FontArc::try_from_vec(f.to_vec()).unwrap();
+                    let id = self.glyph_brush.add_font(font);
+                    self.resource_id_to_font_id.insert(*key, id);
+                }
             }
         }
     }
@@ -255,7 +268,7 @@ impl Renderer {
             }
 
             for (key, data) in self.instance_buffers.iter() {
-                let texture_data = self.render_texture_data.get(key).unwrap();
+                let texture_data = self.texture_render_data.get(key).unwrap();
                 render_pass.set_bind_group(0, &texture_data.bind_group, &[]);
                 render_pass.set_bind_group(1, camera_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, texture_data.vertex_buffer.slice(..));
@@ -267,25 +280,21 @@ impl Renderer {
         }
 
         let mut text_query = world.query::<&text::Text>();
-        let loader = world.get_resource::<Loader>().unwrap();
-        let mut glyph_brush = GlyphBrushBuilder::using_font(loader.get_font_by_id(0))
-            .build(&self.device, TextureFormat::Bgra8UnormSrgb);
-
-        let used_fonts: HashMap<ResourceId, FontId> = HashMap::new();
 
         // Text stuff
         {
+            let default_font_id: FontId = FontId(0);
             for text in text_query.iter(world) {
-                let id = match used_fonts.get(&text.font_id) {
-                    Some(i) => *i,
-                    None => glyph_brush.add_font(loader.get_font_by_id(text.font_id)),
-                };
+                let id = self
+                    .resource_id_to_font_id
+                    .get(&text.font_id)
+                    .unwrap_or(&default_font_id);
 
-                glyph_brush.queue(Section {
+                self.glyph_brush.queue(Section {
                     screen_position: (text.position.x, text.position.y),
                     bounds: (self.config.width as f32, self.config.height as f32),
                     text: vec![Text::new(&text.text)
-                        .with_font_id(id)
+                        .with_font_id(*id)
                         .with_color([1.0, 1.0, 1.0, 1.0])
                         .with_scale(text.font_size)],
                     ..Section::default()
@@ -298,7 +307,7 @@ impl Renderer {
             let time = world.get_resource::<Time>().unwrap();
             if time.frames != 0 {
                 let average_fps = 1.0 / (time.elapsed.as_secs_f32() / time.frames as f32);
-                glyph_brush.queue(Section {
+                self.glyph_brush.queue(Section {
                     screen_position: (20.0, 10.0),
                     bounds: (self.config.width as f32, self.config.height as f32),
                     text: vec![Text::new(&format!("{:.0} avg fps", average_fps))
@@ -308,7 +317,7 @@ impl Renderer {
                 });
 
                 let fps = 1.0 / time.delta_time.as_secs_f32();
-                glyph_brush.queue(Section {
+                self.glyph_brush.queue(Section {
                     screen_position: (20.0, 40.0),
                     bounds: (self.config.width as f32, self.config.height as f32),
                     text: vec![Text::new(&format!("{:.0} fps", fps))
@@ -318,7 +327,7 @@ impl Renderer {
                 });
 
                 let frame_time = time.delta_time.as_micros() as f32 / 1000.0;
-                glyph_brush.queue(Section {
+                self.glyph_brush.queue(Section {
                     screen_position: (20.0, 55.0),
                     bounds: (self.config.width as f32, self.config.height as f32),
                     text: vec![Text::new(&format!("{:.2} ms", frame_time))
@@ -330,7 +339,7 @@ impl Renderer {
         }
 
         // Draw the texts
-        glyph_brush
+        self.glyph_brush
             .draw_queued(
                 &self.device,
                 &mut self.staging_belt,

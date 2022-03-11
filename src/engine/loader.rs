@@ -2,13 +2,12 @@ use crate::texture::Texture;
 use image::{DynamicImage, ImageBuffer};
 use rayon_hash::HashMap;
 use std::{fs, path::Path};
-use wgpu_glyph::ab_glyph::FontArc;
 
 pub type ResourceId = u32;
 
 pub enum Resource {
     Texture(Texture),
-    Font(FontArc),
+    Font(Vec<u8>),
 }
 
 pub struct ResourceData<'a> {
@@ -21,7 +20,6 @@ pub struct Loader {
     resource_ids: HashMap<String, ResourceId>,
     next_resource_id: ResourceId,
     default_texture: Texture,
-    default_font: FontArc,
 }
 
 impl Loader {
@@ -31,14 +29,9 @@ impl Loader {
         }));
         let white_box = Texture::from_image("white", white_img, 0);
 
-        let default_font =
-            FontArc::try_from_slice(include_bytes!("../../resources/Inconsolata-Regular.ttf"))
-                .unwrap();
-
         Loader {
             resources: HashMap::new(),
             resource_ids: HashMap::new(),
-            default_font,
             default_texture: white_box,
             next_resource_id: 1,
         }
@@ -71,8 +64,7 @@ impl Loader {
             let id = self.get_next_valid_id(resource.name);
             match fs::read(resource.path) {
                 Ok(bytes) => {
-                    self.resources
-                        .insert(id, Resource::Font(FontArc::try_from_vec(bytes).unwrap()));
+                    self.resources.insert(id, Resource::Font(bytes));
                 }
                 Err(err) => eprintln!("Error loading font {}. {}", resource.name, err),
             }
@@ -98,13 +90,6 @@ impl Loader {
         match self.resources.get(&id) {
             Some(Resource::Texture(v)) => v,
             _ => &self.default_texture,
-        }
-    }
-
-    pub(crate) fn get_font_by_id(&self, id: ResourceId) -> &FontArc {
-        match self.resources.get(&id) {
-            Some(Resource::Font(v)) => v,
-            _ => &self.default_font,
         }
     }
 
