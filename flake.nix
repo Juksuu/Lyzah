@@ -2,7 +2,7 @@
   description = "Lyzah game engine";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-23.05";
     flake-utils.url = "github:numtide/flake-utils";
     zig.url = "github:mitchellh/zig-overlay";
     zls.url = "github:zigtools/zls";
@@ -25,7 +25,13 @@
           nativeBuildInputs = with pkgs; [
             zigpkgs.master
             zlspkgs.zls
+
+            glfw
+            vulkan-headers
+            vulkan-loader
           ];
+
+          LD_LIBRARY_PATH = "${pkgs.vulkan-loader}/lib";
         };
 
         # For compatibility with older versions of the `nix` binary

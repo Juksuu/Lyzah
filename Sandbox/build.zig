@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.addModule("lyzah", lyzah_dep.module("lyzah"));
-
+    exe.linkLibrary(lyzah_dep.artifact("Lyzah"));
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);

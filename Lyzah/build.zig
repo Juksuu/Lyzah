@@ -8,11 +8,15 @@ pub fn build(b: *std.Build) void {
         .source_file = .{ .path = "src/main.zig" },
     });
 
-    const lib = b.addStaticLibrary(.{
+    var lib = b.addStaticLibrary(.{
         .name = "Lyzah",
         .target = target,
         .optimize = optimize,
     });
+
+    lib.linkLibC();
+    lib.linkSystemLibrary("glfw");
+    lib.linkSystemLibrary("vulkan");
 
     b.installArtifact(lib);
 }
