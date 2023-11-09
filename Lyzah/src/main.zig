@@ -1,6 +1,7 @@
 const std = @import("std");
-const glfw = @import("c.zig").glfw;
-const vulkan = @import("c.zig").vk;
+
+const glfw = @import("c_lib").glfw;
+const vk = @import("c_lib").vk;
 
 pub const Application = struct {
     window: *glfw.GLFWwindow,
@@ -13,20 +14,20 @@ pub const Application = struct {
             return error.NoVulkan;
         }
 
-        var appInfo = vulkan.VkApplicationInfo{};
-        appInfo.sType = vulkan.VK_STRUCTURE_TYPE_APPLICATION_INFO;
+        var appInfo = vk.VkApplicationInfo{};
+        appInfo.sType = vk.VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.pApplicationName = "Hello Triangle";
-        appInfo.applicationVersion = vulkan.VK_MAKE_VERSION(1, 0, 0);
+        appInfo.applicationVersion = vk.VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
-        appInfo.engineVersion = vulkan.VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = vulkan.VK_API_VERSION_1_0;
+        appInfo.engineVersion = vk.VK_MAKE_VERSION(1, 0, 0);
+        appInfo.apiVersion = vk.VK_API_VERSION_1_0;
 
-        var createInfo = vulkan.VkInstanceCreateInfo{};
-        createInfo.sType = vulkan.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+        var createInfo = vk.VkInstanceCreateInfo{};
+        createInfo.sType = vk.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
 
-        var instance: vulkan.VkInstance = null;
-        if (vulkan.vkCreateInstance(&createInfo, null, &instance) != vulkan.VK_SUCCESS) {
+        var instance: vk.VkInstance = null;
+        if (vk.vkCreateInstance(&createInfo, null, &instance) != vk.VK_SUCCESS) {
             std.log.err("Could not createInstance", .{});
             return error.VulkanInstanceError;
         }

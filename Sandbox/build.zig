@@ -4,7 +4,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const lyzah_dep = b.dependency("lyzah", .{ .target = target, .optimize = optimize });
+    const lyzah_dep = b.dependency("lyzah", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     const exe = b.addExecutable(.{
         .name = "Sandbox",
