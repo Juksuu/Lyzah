@@ -10,8 +10,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const c_lib_module = b.addModule("c_lib", .{
-        .source_file = .{ .path = "lib/c_lib.zig" },
+    const vulkan_module = b.addModule("vulkan", .{
+        .source_file = .{ .path = "lib/vulkan.zig" },
+    });
+    const glfw_module = b.addModule("glfw", .{
+        .source_file = .{ .path = "lib/glfw.zig" },
     });
 
     lib.addModule(
@@ -19,7 +22,8 @@ pub fn build(b: *std.Build) void {
         b.addModule("lyzah", .{
             .source_file = .{ .path = "src/main.zig" },
             .dependencies = &.{
-                .{ .name = "c_lib", .module = c_lib_module },
+                .{ .name = "vulkan", .module = vulkan_module },
+                .{ .name = "glfw", .module = glfw_module },
             },
         }),
     );

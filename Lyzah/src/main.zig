@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const glfw = @import("c_lib").glfw;
-const vk = @import("c_lib").vk;
+const glfw = @import("glfw");
+const vk = @import("vulkan");
 
 pub const Application = struct {
     window: *glfw.GLFWwindow,
