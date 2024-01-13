@@ -1,6 +1,8 @@
 const std = @import("std");
 const glfw = @import("glfw");
 
+pub const utils = @import("utils.zig");
+
 pub const WindowSpec = struct {
     width: u16,
     height: u16,

@@ -26,17 +26,25 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const renderer_module = b.addModule("renderer", .{
+        .source_file = .{ .path = "src/renderer/main.zig" },
+        .dependencies = &.{
+            .{ .name = "vulkan", .module = vulkan_module },
+        },
+    });
+
     lib.addModule(
         "lyzah",
         b.addModule("lyzah", .{
             .source_file = .{ .path = "src/main.zig" },
             .dependencies = &.{
                 // C libraries
-                .{ .name = "vulkan", .module = vulkan_module },
-                .{ .name = "glfw", .module = glfw_module },
+                // .{ .name = "vulkan", .module = vulkan_module },
+                // .{ .name = "glfw", .module = glfw_module },
 
                 // Lyzah modules
                 .{ .name = "window", .module = window_module },
+                .{ .name = "renderer", .module = renderer_module },
             },
         }),
     );
