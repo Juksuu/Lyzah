@@ -8,39 +8,6 @@ const Allocator = std.mem.Allocator;
 const enableValidationLayers = std.debug.runtime_safety;
 const validationLayers = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
 
-fn debugCallback(
-    severity: vk.VkDebugUtilsMessageSeverityFlagBitsEXT,
-    msg_type: vk.VkDebugUtilsMessageTypeFlagsEXT,
-    callback_data: ?*const vk.VkDebugUtilsMessengerCallbackDataEXT,
-    user_data: ?*anyopaque,
-) callconv(.C) vk.VkBool32 {
-    _ = user_data;
-    const severity_str = switch (severity) {
-        vk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT => "verbose",
-        vk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT => "info",
-        vk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT => "warning",
-        vk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT => "error",
-        else => "unknown",
-    };
-
-    const type_str = switch (msg_type) {
-        vk.VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT => "general",
-        vk.VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT => "validation",
-        vk.VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT => "performance",
-        vk.VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT => "device address",
-        else => "unknown",
-    };
-
-    const message: [*c]const u8 = if (callback_data) |cb_data| cb_data.pMessage else "NO MESSAGE!";
-    std.debug.print("{s}|{s}: {s}\n", .{ severity_str, type_str, message });
-
-    if (severity >= vk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        @panic("Unrecoverable vulkan error.");
-    }
-
-    return vk.VK_FALSE;
-}
-
 pub const RendererSpec = struct {
     name: [*c]const u8,
     required_extensions: [][*:0]const u8,
@@ -48,13 +15,11 @@ pub const RendererSpec = struct {
 
 pub const Renderer = struct {
     instance: vk.VkInstance,
-    allocator: Allocator,
     debugMessenger: vk.VkDebugUtilsMessengerEXT,
+    physicalDevice: vk.VkPhysicalDevice,
 
     pub fn init(spec: RendererSpec) !Renderer {
-        var allocator = std.heap.c_allocator;
-
-        if (enableValidationLayers and !(try utils.checkValidationLayerSupport(&allocator, @constCast(&validationLayers)))) {
+        if (enableValidationLayers and !(try utils.checkValidationLayerSupport(@constCast(&validationLayers)))) {
             return error.VulkanValidationLayersRequestedButNotAvailable;
         }
 
@@ -67,11 +32,15 @@ pub const Renderer = struct {
             .apiVersion = vk.VK_API_VERSION_1_3,
         };
 
-        const instance = try createInstance(allocator, appInfo, &spec);
-
+        const instance = try createInstance(appInfo, &spec);
         const debugMessenger = try setupDebugCallback(instance);
+        const physicalDevice = try pickPhysicalDevice(instance);
 
-        return .{ .allocator = allocator, .instance = instance, .debugMessenger = debugMessenger };
+        return .{
+            .instance = instance,
+            .debugMessenger = debugMessenger,
+            .physicalDevice = physicalDevice,
+        };
     }
 
     pub fn destroy(self: *Renderer) void {
@@ -81,8 +50,8 @@ pub const Renderer = struct {
         vk.vkDestroyInstance(self.instance, null);
     }
 
-    fn createInstance(allocator: Allocator, appInfo: vk.VkApplicationInfo, spec: *const RendererSpec) !vk.VkInstance {
-        const extensions = try addDebugExtension(allocator, spec);
+    fn createInstance(appInfo: vk.VkApplicationInfo, spec: *const RendererSpec) !vk.VkInstance {
+        const extensions = try addDebugExtension(spec);
 
         std.debug.print("testing {s}", .{extensions});
 
@@ -109,7 +78,8 @@ pub const Renderer = struct {
         return instance;
     }
 
-    fn addDebugExtension(allocator: Allocator, spec: *const RendererSpec) ![][*:0]const u8 {
+    fn addDebugExtension(spec: *const RendererSpec) ![][*:0]const u8 {
+        const allocator = std.heap.c_allocator;
         var extensions = std.ArrayList([*:0]const u8).init(allocator);
         defer extensions.deinit();
 
@@ -127,7 +97,7 @@ pub const Renderer = struct {
             .sType = vk.VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
             .messageSeverity = vk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | vk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | vk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
             .messageType = vk.VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | vk.VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | vk.VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-            .pfnUserCallback = debugCallback,
+            .pfnUserCallback = utils.debugCallback,
             .pUserData = null,
         };
         return createInfo;
@@ -168,5 +138,30 @@ pub const Renderer = struct {
             "vkDestroyDebugUtilsMessengerEXT",
         ))) orelse unreachable;
         func(self.instance, self.debugMessenger, null);
+    }
+
+    fn pickPhysicalDevice(instance: vk.VkInstance) !vk.VkPhysicalDevice {
+        var deviceCount: u32 = 0;
+        try utils.checkSuccess(vk.vkEnumeratePhysicalDevices(instance, &deviceCount, null));
+
+        if (deviceCount == 0) {
+            return error.NoGPUWithVulkanSupport;
+        }
+
+        var allocator = std.heap.c_allocator;
+        const devices = try allocator.alloc(vk.VkPhysicalDevice, deviceCount);
+        defer allocator.free(devices);
+        try utils.checkSuccess(vk.vkEnumeratePhysicalDevices(instance, &deviceCount, devices.ptr));
+
+        return for (devices) |device| {
+            if (isDeviceSuitable(device)) {
+                break device;
+            }
+        } else return error.NoSuitableGPU;
+    }
+
+    fn isDeviceSuitable(device: vk.VkPhysicalDevice) bool {
+        _ = device;
+        return true;
     }
 };
