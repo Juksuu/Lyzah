@@ -4,50 +4,43 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    var lib = b.addStaticLibrary(.{
-        .name = "Lyzah",
-        .target = target,
-        .optimize = optimize,
-    });
-
     // C libraries
-    const vulkan_module = b.addModule("vulkan", .{
-        .source_file = .{ .path = "lib/vulkan.zig" },
+    const vulkan_module = b.createModule(.{
+        .root_source_file = .{ .path = "lib/vulkan.zig" },
     });
-    const glfw_module = b.addModule("glfw", .{
-        .source_file = .{ .path = "lib/glfw.zig" },
+    const glfw_module = b.createModule(.{
+        .root_source_file = .{ .path = "lib/glfw.zig" },
     });
 
     // Lyzah modules
-    const window_module = b.addModule("window", .{
-        .source_file = .{ .path = "src/window/main.zig" },
-        .dependencies = &.{
+    const window_module = b.createModule(.{
+        .root_source_file = .{ .path = "src/window/main.zig" },
+        .imports = &.{
             .{ .name = "glfw", .module = glfw_module },
         },
     });
 
-    const renderer_module = b.addModule("renderer", .{
-        .source_file = .{ .path = "src/renderer/main.zig" },
-        .dependencies = &.{
+    const renderer_module = b.createModule(.{
+        .root_source_file = .{ .path = "src/renderer/main.zig" },
+        .imports = &.{
             .{ .name = "vulkan", .module = vulkan_module },
         },
     });
 
-    lib.addModule(
-        "lyzah",
-        b.addModule("lyzah", .{
-            .source_file = .{ .path = "src/main.zig" },
-            .dependencies = &.{
-                // C libraries
-                // .{ .name = "vulkan", .module = vulkan_module },
-                // .{ .name = "glfw", .module = glfw_module },
+    _ = b.addModule("lyzah", .{
+        .root_source_file = .{ .path = "src/main.zig" },
+        .imports = &.{
+            .{ .name = "window", .module = window_module },
+            .{ .name = "renderer", .module = renderer_module },
+        },
+    });
 
-                // Lyzah modules
-                .{ .name = "window", .module = window_module },
-                .{ .name = "renderer", .module = renderer_module },
-            },
-        }),
-    );
+    const lib = b.addStaticLibrary(.{
+        .name = "Lyzah",
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = .{ .path = "src/main.zig" },
+    });
 
     lib.linkLibC();
     lib.linkSystemLibrary("glfw");

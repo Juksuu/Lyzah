@@ -11,12 +11,12 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "Sandbox",
-        .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
+        .root_source_file = .{ .path = "src/main.zig" },
     });
 
-    exe.addModule("lyzah", lyzah_dep.module("lyzah"));
+    exe.root_module.addImport("lyzah", lyzah_dep.module("lyzah"));
     exe.linkLibrary(lyzah_dep.artifact("Lyzah"));
     b.installArtifact(exe);
 

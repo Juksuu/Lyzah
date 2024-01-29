@@ -53,8 +53,6 @@ pub const Renderer = struct {
     fn createInstance(appInfo: vk.VkApplicationInfo, spec: *const RendererSpec) !vk.VkInstance {
         const extensions = try addDebugExtension(spec);
 
-        std.debug.print("testing {s}", .{extensions});
-
         var createInfo = vk.VkInstanceCreateInfo{
             .sType = vk.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
             .pApplicationInfo = &appInfo,
