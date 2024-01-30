@@ -8,6 +8,14 @@ const Allocator = std.mem.Allocator;
 const enableValidationLayers = std.debug.runtime_safety;
 const validationLayers = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
 
+const QueueFamilyIndices = struct {
+    graphicsFamily: ?u32,
+
+    fn isComplete(self: QueueFamilyIndices) bool {
+        return self.graphicsFamily != null;
+    }
+};
+
 pub const RendererSpec = struct {
     name: [*c]const u8,
     required_extensions: [][*:0]const u8,
@@ -17,6 +25,8 @@ pub const Renderer = struct {
     instance: vk.VkInstance,
     debugMessenger: vk.VkDebugUtilsMessengerEXT,
     physicalDevice: vk.VkPhysicalDevice,
+    device: vk.VkDevice,
+    deviceQueue: vk.VkQueue,
 
     pub fn init(spec: RendererSpec) !Renderer {
         if (enableValidationLayers and !(try utils.checkValidationLayerSupport(@constCast(&validationLayers)))) {
@@ -35,11 +45,14 @@ pub const Renderer = struct {
         const instance = try createInstance(appInfo, &spec);
         const debugMessenger = try setupDebugCallback(instance);
         const physicalDevice = try pickPhysicalDevice(instance);
+        const deviceData = try createLogicalDevice(physicalDevice);
 
         return .{
             .instance = instance,
             .debugMessenger = debugMessenger,
             .physicalDevice = physicalDevice,
+            .device = deviceData.device,
+            .deviceQueue = deviceData.deviceQueue,
         };
     }
 
@@ -47,6 +60,7 @@ pub const Renderer = struct {
         if (enableValidationLayers) {
             self.destroyDebugMessenger();
         }
+        vk.vkDestroyDevice(self.device, null);
         vk.vkDestroyInstance(self.instance, null);
     }
 
@@ -152,14 +166,77 @@ pub const Renderer = struct {
         try utils.checkSuccess(vk.vkEnumeratePhysicalDevices(instance, &deviceCount, devices.ptr));
 
         return for (devices) |device| {
-            if (isDeviceSuitable(device)) {
+            if (try isDeviceSuitable(device)) {
                 break device;
             }
         } else return error.NoSuitableGPU;
     }
 
-    fn isDeviceSuitable(device: vk.VkPhysicalDevice) bool {
-        _ = device;
-        return true;
+    fn isDeviceSuitable(device: vk.VkPhysicalDevice) !bool {
+        const indices = try findQueueFamilies(device);
+
+        return indices.isComplete();
+    }
+
+    fn findQueueFamilies(device: vk.VkPhysicalDevice) !QueueFamilyIndices {
+        var indices: QueueFamilyIndices = .{ .graphicsFamily = null };
+
+        var queueFamilyCount: u32 = 0;
+        vk.vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, null);
+
+        var allocator = std.heap.c_allocator;
+        const queueFamilies = try allocator.alloc(vk.VkQueueFamilyProperties, queueFamilyCount);
+        defer allocator.free(queueFamilies);
+
+        vk.vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.ptr);
+
+        for (0.., queueFamilies) |i, family| {
+            if ((family.queueFlags & vk.VK_QUEUE_GRAPHICS_BIT) != 0) {
+                indices.graphicsFamily = @truncate(i);
+            }
+
+            if (indices.isComplete()) {
+                break;
+            }
+        }
+
+        return indices;
+    }
+
+    fn createLogicalDevice(physicalDevice: vk.VkPhysicalDevice) !struct { device: vk.VkDevice, deviceQueue: vk.VkQueue } {
+        const indices = try findQueueFamilies(physicalDevice);
+
+        const queuePriority: f32 = 1.0;
+        var queueCreateInfo: vk.VkDeviceQueueCreateInfo = .{
+            .sType = vk.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = indices.graphicsFamily.?,
+            .queueCount = 1,
+            .pQueuePriorities = &queuePriority,
+        };
+
+        var deviceFeatures: vk.VkPhysicalDeviceFeatures = .{};
+
+        var deviceCreateInfo: vk.VkDeviceCreateInfo = .{
+            .sType = vk.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+            .pQueueCreateInfos = &queueCreateInfo,
+            .queueCreateInfoCount = 1,
+            .pEnabledFeatures = &deviceFeatures,
+            .enabledExtensionCount = 0,
+        };
+
+        if (enableValidationLayers) {
+            deviceCreateInfo.enabledLayerCount = validationLayers.len;
+            deviceCreateInfo.ppEnabledLayerNames = @ptrCast(&validationLayers);
+        } else {
+            deviceCreateInfo.enabledLayerCount = 0;
+        }
+
+        var device: vk.VkDevice = null;
+        try utils.checkSuccess(vk.vkCreateDevice(physicalDevice, &deviceCreateInfo, null, &device));
+
+        var graphicsQueue: vk.VkQueue = null;
+        vk.vkGetDeviceQueue(device, indices.graphicsFamily.?, 0, &graphicsQueue);
+
+        return .{ .device = device, .deviceQueue = graphicsQueue };
     }
 };
