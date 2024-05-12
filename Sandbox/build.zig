@@ -4,11 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const lyzah_dep = b.dependency("lyzah", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
     const exe = b.addExecutable(.{
         .name = "Sandbox",
         .target = target,
@@ -16,8 +11,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "src/main.zig" },
     });
 
+    const lyzah_dep = b.dependency("lyzah", .{});
+
     exe.root_module.addImport("lyzah", lyzah_dep.module("lyzah"));
-    exe.linkLibrary(lyzah_dep.artifact("Lyzah"));
+    exe.linkLibC();
+    exe.linkSystemLibrary("glfw");
+    exe.linkSystemLibrary("vulkan");
+
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);

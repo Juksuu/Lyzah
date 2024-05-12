@@ -1,5 +1,5 @@
 const std = @import("std");
-const glfw = @import("glfw");
+const c = @import("../c.zig");
 
 pub const utils = @import("utils.zig");
 
@@ -10,19 +10,21 @@ pub const WindowSpec = struct {
 };
 
 pub const Window = struct {
-    glfw_window: *glfw.GLFWwindow,
+    glfw_window: *c.GLFWwindow,
 
     pub fn init(spec: WindowSpec) !Window {
-        if (glfw.glfwInit() != glfw.GLFW_TRUE) return error.GlfwInitFailed;
+        _ = c.glfwSetErrorCallback(utils.errorCallback);
 
-        if (glfw.glfwVulkanSupported() != glfw.GLFW_TRUE) {
+        if (c.glfwInit() != c.GLFW_TRUE) return error.GlfwInitFailed;
+
+        if (c.glfwVulkanSupported() != c.GLFW_TRUE) {
             std.log.err("GLFW could not find libvulkan", .{});
             return error.NoVulkan;
         }
 
-        glfw.glfwWindowHint(glfw.GLFW_CLIENT_API, glfw.GLFW_NO_API);
+        c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_NO_API);
 
-        const window = glfw.glfwCreateWindow(
+        const window = c.glfwCreateWindow(
             @intCast(spec.width),
             @intCast(spec.height),
             spec.name,
@@ -34,16 +36,16 @@ pub const Window = struct {
     }
 
     pub fn destroy(self: *Window) void {
-        glfw.glfwDestroyWindow(self.glfw_window);
-        glfw.glfwTerminate();
+        c.glfwDestroyWindow(self.glfw_window);
+        c.glfwTerminate();
     }
 
     pub fn shouldClose(self: *Window) bool {
-        return glfw.glfwWindowShouldClose(self.glfw_window) == glfw.GLFW_FALSE;
+        return c.glfwWindowShouldClose(self.glfw_window) == c.GLFW_FALSE;
     }
 
     pub fn pollEvents(self: *Window) void {
         _ = self;
-        glfw.glfwPollEvents();
+        c.glfwPollEvents();
     }
 };

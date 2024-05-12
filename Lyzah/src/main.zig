@@ -1,23 +1,24 @@
 const std = @import("std");
 
-const window = @import("window");
-const renderer = @import("renderer");
+const window = @import("./window/main.zig");
+const renderer = @import("./renderer/main.zig");
 
 pub const Application = struct {
     window: window.Window,
     renderer: renderer.Renderer,
 
     pub fn init() !Application {
+        const w = try window.Window.init(.{
+            .name = "Lyzah",
+            .width = 1280,
+            .height = 720,
+        });
         return Application{
-            .window = try window.Window.init(.{
-                .width = 1280,
-                .height = 720,
-                .name = "Lyzah",
-            }),
+            .window = w,
             .renderer = try renderer.Renderer.init(.{
                 .name = "Lyzah",
                 .required_extensions = window.utils.getRequiredInstanceExtensions(),
-            }),
+            }, w.glfw_window),
         };
     }
 

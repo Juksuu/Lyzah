@@ -2,10 +2,18 @@
   description = "Lyzah game engine";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-23.11";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    zig.url = "github:mitchellh/zig-overlay";
-    zls.url = "github:zigtools/zls";
+
+    zig = {
+      url = "github:mitchellh/zig-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    zls = {
+      url = "github:zigtools/zls";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.zig-overlay.follows = "zig";
+    };
   };
 
   outputs = { self, nixpkgs, flake-utils, ... }@inputs:
@@ -27,6 +35,7 @@
             zlspkgs.zls
 
             glfw
+            wayland
 
             vulkan-loader
             vulkan-headers
@@ -34,10 +43,7 @@
             vulkan-validation-layers
           ];
 
-          LD_LIBRARY_PATH = "${pkgs.vulkan-loader}/lib";
+          LD_LIBRARY_PATH = "${pkgs.vulkan-loader}/lib:${pkgs.wayland}/lib";
         };
-
-        # For compatibility with older versions of the `nix` binary
-        devShell = self.devShells.${system}.default;
       });
 }
