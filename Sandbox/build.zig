@@ -8,7 +8,10 @@ pub fn build(b: *std.Build) void {
         .name = "Sandbox",
         .target = target,
         .optimize = optimize,
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .src_path = .{
+            .owner = b,
+            .sub_path = "src/main.zig",
+        } },
     });
 
     const lyzah_dep = b.dependency("lyzah", .{});
