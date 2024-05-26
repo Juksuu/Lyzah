@@ -4,19 +4,28 @@ const window = @import("./window/main.zig");
 const renderer = @import("./renderer/main.zig");
 
 pub const Application = struct {
+    gpa: std.heap.GeneralPurposeAllocator(.{}),
+    allocator: std.mem.Allocator,
+
     window: window.Window,
     renderer: renderer.Renderer,
 
     pub fn init() !Application {
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator = gpa.allocator();
+
         const w = try window.Window.init(.{
             .name = "Lyzah",
             .width = 1280,
             .height = 720,
         });
         return Application{
+            .gpa = gpa,
+            .allocator = allocator,
             .window = w,
             .renderer = try renderer.Renderer.init(.{
                 .name = "Lyzah",
+                .allocator = allocator,
                 .required_extensions = window.utils.getRequiredInstanceExtensions(),
             }, w.glfw_window),
         };
@@ -25,6 +34,9 @@ pub const Application = struct {
     pub fn destroy(self: *Application) void {
         self.renderer.destroy();
         self.window.destroy();
+
+        const deinit_status = self.gpa.deinit();
+        if (deinit_status == .leak) @panic("Leaked memory");
     }
 
     pub fn run(self: *Application) void {

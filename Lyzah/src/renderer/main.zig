@@ -17,12 +17,20 @@ const QueueFamilyIndices = struct {
     }
 };
 
+const LogicalDeviceData = struct {
+    device: c.VkDevice,
+    graphicsQueue: c.VkQueue,
+    presentQueue: c.VkQueue,
+};
+
 pub const RendererSpec = struct {
     name: [*c]const u8,
+    allocator: Allocator,
     required_extensions: [][*:0]const u8,
 };
 
 pub const Renderer = struct {
+    allocator: Allocator,
     instance: c.VkInstance,
     debugMessenger: c.VkDebugUtilsMessengerEXT,
     physicalDevice: c.VkPhysicalDevice,
@@ -45,13 +53,14 @@ pub const Renderer = struct {
             .apiVersion = c.VK_API_VERSION_1_3,
         };
 
-        const instance = try createInstance(appInfo, &spec);
+        const instance = try createInstance(spec.allocator, spec.required_extensions, appInfo);
         const debugMessenger = try setupDebugCallback(instance);
         const surface = try createSurface(instance, glfwWindow);
-        const physicalDevice = try pickPhysicalDevice(instance, surface);
-        const deviceData = try createLogicalDevice(physicalDevice, surface);
+        const physicalDevice = try pickPhysicalDevice(spec.allocator, instance, surface);
+        const deviceData = try createLogicalDevice(spec.allocator, physicalDevice, surface);
 
         return .{
+            .allocator = spec.allocator,
             .instance = instance,
             .debugMessenger = debugMessenger,
             .physicalDevice = physicalDevice,
@@ -71,8 +80,8 @@ pub const Renderer = struct {
         c.vkDestroyInstance(self.instance, null);
     }
 
-    fn createInstance(appInfo: c.VkApplicationInfo, spec: *const RendererSpec) !c.VkInstance {
-        const extensions = try addDebugExtension(spec);
+    fn createInstance(allocator: Allocator, required_extensions: [][*:0]const u8, appInfo: c.VkApplicationInfo) !c.VkInstance {
+        const extensions = try addDebugExtension(allocator, required_extensions);
 
         var createInfo = c.VkInstanceCreateInfo{
             .sType = c.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -97,12 +106,11 @@ pub const Renderer = struct {
         return instance;
     }
 
-    fn addDebugExtension(spec: *const RendererSpec) ![][*:0]const u8 {
-        const allocator = std.heap.c_allocator;
+    fn addDebugExtension(allocator: Allocator, required_extensions: [][*:0]const u8) ![][*:0]const u8 {
         var extensions = std.ArrayList([*:0]const u8).init(allocator);
         defer extensions.deinit();
 
-        try extensions.appendSlice(spec.required_extensions[0..spec.required_extensions.len]);
+        try extensions.appendSlice(required_extensions[0..required_extensions.len]);
 
         if (enableValidationLayers) {
             try extensions.append(c.VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -159,7 +167,7 @@ pub const Renderer = struct {
         func(self.instance, self.debugMessenger, null);
     }
 
-    fn pickPhysicalDevice(instance: c.VkInstance, surface: c.VkSurfaceKHR) !c.VkPhysicalDevice {
+    fn pickPhysicalDevice(allocator: Allocator, instance: c.VkInstance, surface: c.VkSurfaceKHR) !c.VkPhysicalDevice {
         var deviceCount: u32 = 0;
         try utils.checkSuccess(c.vkEnumeratePhysicalDevices(instance, &deviceCount, null));
 
@@ -167,30 +175,28 @@ pub const Renderer = struct {
             return error.NoGPUWithVulkanSupport;
         }
 
-        var allocator = std.heap.c_allocator;
         const devices = try allocator.alloc(c.VkPhysicalDevice, deviceCount);
         defer allocator.free(devices);
         try utils.checkSuccess(c.vkEnumeratePhysicalDevices(instance, &deviceCount, devices.ptr));
 
         return for (devices) |device| {
-            if (try isDeviceSuitable(device, surface)) {
+            if (try isDeviceSuitable(allocator, device, surface)) {
                 break device;
             }
         } else return error.NoSuitableGPU;
     }
 
-    fn isDeviceSuitable(device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !bool {
-        const indices = try findQueueFamilies(device, surface);
+    fn isDeviceSuitable(allocator: Allocator, device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !bool {
+        const indices = try findQueueFamilies(allocator, device, surface);
         return indices.isComplete();
     }
 
-    fn findQueueFamilies(device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !QueueFamilyIndices {
+    fn findQueueFamilies(allocator: Allocator, device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !QueueFamilyIndices {
         var indices: QueueFamilyIndices = .{ .graphicsFamily = null, .presentFamily = null };
 
         var queueFamilyCount: u32 = 0;
         c.vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, null);
 
-        var allocator = std.heap.c_allocator;
         const queueFamilies = try allocator.alloc(c.VkQueueFamilyProperties, queueFamilyCount);
         defer allocator.free(queueFamilies);
 
@@ -216,10 +222,8 @@ pub const Renderer = struct {
         return indices;
     }
 
-    fn createLogicalDevice(physicalDevice: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !struct { device: c.VkDevice, graphicsQueue: c.VkQueue, presentQueue: c.VkQueue } {
-        const indices = try findQueueFamilies(physicalDevice, surface);
-
-        const allocator = std.heap.c_allocator;
+    fn createLogicalDevice(allocator: Allocator, physicalDevice: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !LogicalDeviceData {
+        const indices = try findQueueFamilies(allocator, physicalDevice, surface);
 
         var queueCreateInfos = std.ArrayList(c.VkDeviceQueueCreateInfo).init(allocator);
         queueCreateInfos.deinit();
