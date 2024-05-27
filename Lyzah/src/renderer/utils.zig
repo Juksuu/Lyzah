@@ -1,16 +1,16 @@
 const std = @import("std");
 const c = @import("../c.zig");
 
-pub inline fn checkSuccess(result: c.VkResult) !void {
+const Allocator = std.mem.Allocator;
+
+pub fn checkSuccess(result: c.VkResult) !void {
     switch (result) {
         c.VK_SUCCESS => {},
         else => return error.VulkanUnexpectedError,
     }
 }
 
-pub inline fn checkValidationLayerSupport(layers: [][*:0]const u8) !bool {
-    var allocator = std.heap.c_allocator;
-
+pub fn checkValidationLayerSupport(allocator: Allocator, layers: [][*:0]const u8) !bool {
     var layerCount: u32 = undefined;
     try checkSuccess(c.vkEnumerateInstanceLayerProperties(&layerCount, null));
 
@@ -32,6 +32,35 @@ pub inline fn checkValidationLayerSupport(layers: [][*:0]const u8) !bool {
         }
 
         if (!layerFound) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+pub fn checkDeviceExtensionSupport(allocator: Allocator, device: c.VkPhysicalDevice, extensions: [][*:0]const u8) !bool {
+    var extensionCount: u32 = undefined;
+    try checkSuccess(c.vkEnumerateDeviceExtensionProperties(device, null, &extensionCount, null));
+
+    const availableExtensions = try allocator.alloc(c.VkExtensionProperties, extensionCount);
+    defer allocator.free(availableExtensions);
+
+    try checkSuccess(c.vkEnumerateDeviceExtensionProperties(device, null, &extensionCount, availableExtensions.ptr));
+
+    for (extensions) |name| {
+        var found = false;
+
+        for (availableExtensions) |extension| {
+            const extensionNameWithLength = std.mem.span(name);
+            const length = @min(extensionNameWithLength.len, extension.extensionName.len);
+            if (std.mem.eql(u8, extensionNameWithLength, extension.extensionName[0..length])) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
             return false;
         }
     }

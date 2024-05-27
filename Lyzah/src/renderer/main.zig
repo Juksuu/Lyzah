@@ -8,12 +8,35 @@ const Allocator = std.mem.Allocator;
 const enableValidationLayers = std.debug.runtime_safety;
 const validationLayers = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
 
+const deviceExtensions = [_][*:0]const u8{c.VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+
 const QueueFamilyIndices = struct {
     graphicsFamily: ?u32,
     presentFamily: ?u32,
 
+    fn init() QueueFamilyIndices {
+        return QueueFamilyIndices{
+            .graphicsFamily = null,
+            .presentFamily = null,
+        };
+    }
+
     fn isComplete(self: QueueFamilyIndices) bool {
         return self.graphicsFamily != null and self.presentFamily != null;
+    }
+};
+
+const SwapChainSupportDetails = struct {
+    capabilities: c.VkSurfaceCapabilitiesKHR,
+    formats: std.ArrayList(c.VkSurfaceFormatKHR),
+    presentModes: std.ArrayList(c.VkPresentModeKHR),
+
+    fn init(allocator: Allocator) SwapChainSupportDetails {
+        return SwapChainSupportDetails{
+            .capabilities = undefined,
+            .formats = std.ArrayList(c.VkSurfaceFormatKHR).init(allocator),
+            .presentModes = std.ArrayList(c.VkPresentModeKHR).init(allocator),
+        };
     }
 };
 
@@ -40,16 +63,16 @@ pub const Renderer = struct {
     surface: c.VkSurfaceKHR,
 
     pub fn init(spec: RendererSpec, glfwWindow: *c.GLFWwindow) !Renderer {
-        if (enableValidationLayers and !(try utils.checkValidationLayerSupport(@constCast(&validationLayers)))) {
+        if (enableValidationLayers and !(try utils.checkValidationLayerSupport(spec.allocator, @constCast(&validationLayers)))) {
             return error.VulkanValidationLayersRequestedButNotAvailable;
         }
 
         const appInfo = c.VkApplicationInfo{
             .sType = c.VK_STRUCTURE_TYPE_APPLICATION_INFO,
             .pApplicationName = spec.name,
-            .applicationVersion = c.VK_MAKE_VERSION(1, 0, 0),
+            .applicationVersion = c.VK_MAKE_VERSION(0, 1, 0),
             .pEngineName = spec.name,
-            .engineVersion = c.VK_MAKE_VERSION(1, 0, 0),
+            .engineVersion = c.VK_MAKE_VERSION(0, 1, 0),
             .apiVersion = c.VK_API_VERSION_1_3,
         };
 
@@ -188,11 +211,19 @@ pub const Renderer = struct {
 
     fn isDeviceSuitable(allocator: Allocator, device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !bool {
         const indices = try findQueueFamilies(allocator, device, surface);
-        return indices.isComplete();
+        const extensionsSupported = try utils.checkDeviceExtensionSupport(allocator, device, @constCast(&deviceExtensions));
+
+        var swapChainAdequate = false;
+        if (extensionsSupported) {
+            const swapChainSupport = try querySwapChainSupport(allocator, device, surface);
+            swapChainAdequate = swapChainSupport.formats.items.len > 0 and swapChainSupport.presentModes.items.len > 0;
+        }
+
+        return indices.isComplete() and swapChainAdequate;
     }
 
     fn findQueueFamilies(allocator: Allocator, device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !QueueFamilyIndices {
-        var indices: QueueFamilyIndices = .{ .graphicsFamily = null, .presentFamily = null };
+        var indices = QueueFamilyIndices.init();
 
         var queueFamilyCount: u32 = 0;
         c.vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, null);
@@ -253,7 +284,8 @@ pub const Renderer = struct {
             .pQueueCreateInfos = queueCreateInfos.items.ptr,
             .queueCreateInfoCount = @truncate(queueCreateInfos.items.len),
             .pEnabledFeatures = &deviceFeatures,
-            .enabledExtensionCount = 0,
+            .enabledExtensionCount = @intCast(deviceExtensions.len),
+            .ppEnabledExtensionNames = &deviceExtensions,
         };
 
         if (enableValidationLayers) {
@@ -279,5 +311,28 @@ pub const Renderer = struct {
         var surface: c.VkSurfaceKHR = null;
         try utils.checkSuccess(c.glfwCreateWindowSurface(instance, window, null, &surface));
         return surface;
+    }
+
+    fn querySwapChainSupport(allocator: Allocator, device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !SwapChainSupportDetails {
+        var details = SwapChainSupportDetails.init(allocator);
+        try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities));
+
+        var formatCount: u32 = 0;
+        try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, null));
+
+        if (formatCount != 0) {
+            try details.formats.resize(formatCount);
+            try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.items.ptr));
+        }
+
+        var presentModeCount: u32 = 0;
+        try utils.checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, null));
+
+        if (presentModeCount != 0) {
+            try details.presentModes.resize(presentModeCount);
+            try utils.checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.items.ptr));
+        }
+
+        return details;
     }
 };
