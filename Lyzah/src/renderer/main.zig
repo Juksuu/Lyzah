@@ -3,6 +3,7 @@ const c = @import("../c.zig");
 
 const utils = @import("utils.zig");
 
+const maxInt = std.math.maxInt;
 const Allocator = std.mem.Allocator;
 
 const enableValidationLayers = std.debug.runtime_safety;
@@ -38,12 +39,24 @@ const SwapChainSupportDetails = struct {
             .presentModes = std.ArrayList(c.VkPresentModeKHR).init(allocator),
         };
     }
+
+    fn deinit(self: *SwapChainSupportDetails) void {
+        self.formats.deinit();
+        self.presentModes.deinit();
+    }
 };
 
 const LogicalDeviceData = struct {
     device: c.VkDevice,
     graphicsQueue: c.VkQueue,
     presentQueue: c.VkQueue,
+};
+
+const SwapChainData = struct {
+    swapChain: c.VkSwapchainKHR,
+    images: std.ArrayList(c.VkImage),
+    imageFormat: c.VkFormat,
+    extent: c.VkExtent2D,
 };
 
 pub const RendererSpec = struct {
@@ -61,6 +74,7 @@ pub const Renderer = struct {
     graphicsQueue: c.VkQueue,
     presentQueue: c.VkQueue,
     surface: c.VkSurfaceKHR,
+    swapChainData: SwapChainData,
 
     pub fn init(spec: RendererSpec, glfwWindow: *c.GLFWwindow) !Renderer {
         if (enableValidationLayers and !(try utils.checkValidationLayerSupport(spec.allocator, @constCast(&validationLayers)))) {
@@ -81,6 +95,7 @@ pub const Renderer = struct {
         const surface = try createSurface(instance, glfwWindow);
         const physicalDevice = try pickPhysicalDevice(spec.allocator, instance, surface);
         const deviceData = try createLogicalDevice(spec.allocator, physicalDevice, surface);
+        const swapChainData = try createSwapChain(spec.allocator, physicalDevice, surface, deviceData.device, glfwWindow);
 
         return .{
             .allocator = spec.allocator,
@@ -91,6 +106,7 @@ pub const Renderer = struct {
             .graphicsQueue = deviceData.graphicsQueue,
             .presentQueue = deviceData.presentQueue,
             .surface = surface,
+            .swapChainData = swapChainData,
         };
     }
 
@@ -98,9 +114,12 @@ pub const Renderer = struct {
         if (enableValidationLayers) {
             self.destroyDebugMessenger();
         }
+        c.vkDestroySwapchainKHR(self.device, self.swapChainData.swapChain, null);
         c.vkDestroyDevice(self.device, null);
         c.vkDestroySurfaceKHR(self.instance, self.surface, null);
         c.vkDestroyInstance(self.instance, null);
+
+        self.swapChainData.images.deinit();
     }
 
     fn createInstance(allocator: Allocator, required_extensions: [][*:0]const u8, appInfo: c.VkApplicationInfo) !c.VkInstance {
@@ -215,7 +234,8 @@ pub const Renderer = struct {
 
         var swapChainAdequate = false;
         if (extensionsSupported) {
-            const swapChainSupport = try querySwapChainSupport(allocator, device, surface);
+            var swapChainSupport = try querySwapChainSupport(allocator, device, surface);
+            defer swapChainSupport.deinit();
             swapChainAdequate = swapChainSupport.formats.items.len > 0 and swapChainSupport.presentModes.items.len > 0;
         }
 
@@ -334,5 +354,104 @@ pub const Renderer = struct {
         }
 
         return details;
+    }
+
+    fn chooseSwapSurfaceFormat(availableFormats: std.ArrayList(c.VkSurfaceFormatKHR)) c.VkSurfaceFormatKHR {
+        for (availableFormats.items) |format| {
+            if (format.format == c.VK_FORMAT_B8G8R8A8_SRGB and format.colorSpace == c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                return format;
+            }
+        }
+
+        return availableFormats.items[0];
+    }
+
+    fn chooseSwapPresentMode(availablePresentModes: std.ArrayList(c.VkPresentModeKHR)) c.VkPresentModeKHR {
+        for (availablePresentModes.items) |presentMode| {
+            if (presentMode == c.VK_PRESENT_MODE_MAILBOX_KHR) {
+                return presentMode;
+            }
+        }
+
+        return c.VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    fn chooseSwapExtent(capabilities: c.VkSurfaceCapabilitiesKHR, window: *c.GLFWwindow) c.VkExtent2D {
+        if (capabilities.currentExtent.width != maxInt(u32)) {
+            return capabilities.currentExtent;
+        } else {
+            var width: c_int = undefined;
+            var height: c_int = undefined;
+            c.glfwGetFramebufferSize(window, &width, &height);
+
+            var actualExtent = c.VkExtent2D{
+                .width = @intCast(width),
+                .height = @intCast(height),
+            };
+
+            actualExtent.width = std.math.clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+            actualExtent.height = std.math.clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+            return actualExtent;
+        }
+    }
+
+    fn createSwapChain(allocator: Allocator, physicalDevice: c.VkPhysicalDevice, surface: c.VkSurfaceKHR, device: c.VkDevice, window: *c.GLFWwindow) !SwapChainData {
+        var swapChainSupportDetails = try querySwapChainSupport(allocator, physicalDevice, surface);
+        defer swapChainSupportDetails.deinit();
+
+        const surfaceFormat = chooseSwapSurfaceFormat(swapChainSupportDetails.formats);
+        const presentMode = chooseSwapPresentMode(swapChainSupportDetails.presentModes);
+        const extent = chooseSwapExtent(swapChainSupportDetails.capabilities, window);
+
+        var imageCount = swapChainSupportDetails.capabilities.minImageCount + 1;
+        const maxImageCount = swapChainSupportDetails.capabilities.maxImageCount;
+
+        if (maxImageCount > 0 and imageCount > maxImageCount) {
+            imageCount = maxImageCount;
+        }
+
+        var createInfo: c.VkSwapchainCreateInfoKHR = .{
+            .sType = c.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+            .surface = surface,
+            .minImageCount = imageCount,
+            .imageFormat = surfaceFormat.format,
+            .imageColorSpace = surfaceFormat.colorSpace,
+            .imageExtent = extent,
+            .imageArrayLayers = 1,
+            .imageUsage = c.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            .preTransform = swapChainSupportDetails.capabilities.currentTransform,
+            .compositeAlpha = c.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            .presentMode = presentMode,
+            .clipped = c.VK_TRUE,
+            .oldSwapchain = null,
+        };
+
+        const indices = try findQueueFamilies(allocator, physicalDevice, surface);
+        const queueFamilyIndices = [_]u32{ indices.graphicsFamily.?, indices.presentFamily.? };
+
+        if (indices.graphicsFamily != indices.presentFamily) {
+            createInfo.imageSharingMode = c.VK_SHARING_MODE_CONCURRENT;
+            createInfo.queueFamilyIndexCount = 2;
+            createInfo.pQueueFamilyIndices = &queueFamilyIndices;
+        } else {
+            createInfo.imageSharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
+            createInfo.queueFamilyIndexCount = 0;
+            createInfo.pQueueFamilyIndices = null;
+        }
+
+        var swapChain: c.VkSwapchainKHR = undefined;
+        try utils.checkSuccess(c.vkCreateSwapchainKHR(device, &createInfo, null, &swapChain));
+
+        var swapChainImages = std.ArrayList(c.VkImage).init(allocator);
+        try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapChain, &imageCount, null));
+        try swapChainImages.resize(imageCount);
+        try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapChain, &imageCount, swapChainImages.items.ptr));
+
+        return SwapChainData{
+            .swapChain = swapChain,
+            .imageFormat = surfaceFormat.format,
+            .extent = extent,
+            .images = swapChainImages,
+        };
     }
 };
