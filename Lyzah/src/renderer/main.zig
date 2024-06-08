@@ -57,6 +57,7 @@ const SwapChainData = struct {
     images: std.ArrayList(c.VkImage),
     imageFormat: c.VkFormat,
     extent: c.VkExtent2D,
+    imageViews: std.ArrayList(c.VkImageView),
 };
 
 pub const RendererSpec = struct {
@@ -114,12 +115,18 @@ pub const Renderer = struct {
         if (enableValidationLayers) {
             self.destroyDebugMessenger();
         }
+
+        for (self.swapChainData.imageViews.items) |imageView| {
+            c.vkDestroyImageView(self.device, imageView, null);
+        }
+
         c.vkDestroySwapchainKHR(self.device, self.swapChainData.swapChain, null);
         c.vkDestroyDevice(self.device, null);
         c.vkDestroySurfaceKHR(self.instance, self.surface, null);
         c.vkDestroyInstance(self.instance, null);
 
         self.swapChainData.images.deinit();
+        self.swapChainData.imageViews.deinit();
     }
 
     fn createInstance(allocator: Allocator, required_extensions: [][*:0]const u8, appInfo: c.VkApplicationInfo) !c.VkInstance {
@@ -447,11 +454,43 @@ pub const Renderer = struct {
         try swapChainImages.resize(imageCount);
         try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapChain, &imageCount, swapChainImages.items.ptr));
 
+        var swapChainImageViews = std.ArrayList(c.VkImageView).init(allocator);
+        try swapChainImageViews.resize(swapChainImages.items.len);
+
+        for (0..swapChainImages.items.len) |i| {
+            const components: c.VkComponentMapping = .{
+                .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
+                .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
+                .b = c.VK_COMPONENT_SWIZZLE_IDENTITY,
+                .a = c.VK_COMPONENT_SWIZZLE_IDENTITY,
+            };
+
+            const subresourceRange: c.VkImageSubresourceRange = .{
+                .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            };
+
+            var imageViewCreateInfo: c.VkImageViewCreateInfo = .{
+                .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .image = swapChainImages.items[i],
+                .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
+                .format = surfaceFormat.format,
+                .components = components,
+                .subresourceRange = subresourceRange,
+            };
+
+            try utils.checkSuccess(c.vkCreateImageView(device, &imageViewCreateInfo, null, &swapChainImageViews.items[i]));
+        }
+
         return SwapChainData{
             .swapChain = swapChain,
             .imageFormat = surfaceFormat.format,
             .extent = extent,
             .images = swapChainImages,
+            .imageViews = swapChainImageViews,
         };
     }
 };
