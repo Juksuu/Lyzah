@@ -100,3 +100,27 @@ pub fn debugCallback(
 
     return c.VK_FALSE;
 }
+
+pub fn readFileToBuffer(allocator: Allocator, filePath: []const u8) ![]u8 {
+    var file = try std.fs.cwd().openFile(filePath, .{ .mode = .read_only });
+
+    const fileSize = (try file.stat()).size;
+    const buffer = try allocator.alloc(u8, fileSize);
+
+    _ = try file.read(buffer);
+
+    return buffer;
+}
+
+pub fn createShaderModule(code: []const u8, device: c.VkDevice) !c.VkShaderModule {
+    const createInfo: c.VkShaderModuleCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = code.len,
+        .pCode = @alignCast(@ptrCast(code.ptr)),
+    };
+
+    var shaderModule: c.VkShaderModule = undefined;
+    try checkSuccess(c.vkCreateShaderModule(device, &createInfo, null, &shaderModule));
+
+    return shaderModule;
+}

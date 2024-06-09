@@ -10,6 +10,7 @@ const enableValidationLayers = std.debug.runtime_safety;
 const validationLayers = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
 
 const deviceExtensions = [_][*:0]const u8{c.VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+const dynamicStates = [_]c_int{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
 
 const QueueFamilyIndices = struct {
     graphicsFamily: ?u32,
@@ -76,6 +77,7 @@ pub const Renderer = struct {
     presentQueue: c.VkQueue,
     surface: c.VkSurfaceKHR,
     swapChainData: SwapChainData,
+    pipelineLayout: c.VkPipelineLayout,
 
     pub fn init(spec: RendererSpec, glfwWindow: *c.GLFWwindow) !Renderer {
         if (enableValidationLayers and !(try utils.checkValidationLayerSupport(spec.allocator, @constCast(&validationLayers)))) {
@@ -98,6 +100,8 @@ pub const Renderer = struct {
         const deviceData = try createLogicalDevice(spec.allocator, physicalDevice, surface);
         const swapChainData = try createSwapChain(spec.allocator, physicalDevice, surface, deviceData.device, glfwWindow);
 
+        const pipelineLayout = try createGraphicsPipeline(spec.allocator, deviceData.device);
+
         return .{
             .allocator = spec.allocator,
             .instance = instance,
@@ -108,6 +112,7 @@ pub const Renderer = struct {
             .presentQueue = deviceData.presentQueue,
             .surface = surface,
             .swapChainData = swapChainData,
+            .pipelineLayout = pipelineLayout,
         };
     }
 
@@ -115,6 +120,8 @@ pub const Renderer = struct {
         if (enableValidationLayers) {
             self.destroyDebugMessenger();
         }
+
+        c.vkDestroyPipelineLayout(self.device, self.pipelineLayout, null);
 
         for (self.swapChainData.imageViews.items) |imageView| {
             c.vkDestroyImageView(self.device, imageView, null);
@@ -492,5 +499,108 @@ pub const Renderer = struct {
             .images = swapChainImages,
             .imageViews = swapChainImageViews,
         };
+    }
+
+    fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice) !c.VkPipelineLayout {
+        const vert = try utils.readFileToBuffer(allocator, "shaders/vert.spv");
+        const frag = try utils.readFileToBuffer(allocator, "shaders/frag.spv");
+
+        const vertModule = try utils.createShaderModule(vert, device);
+        const fragModule = try utils.createShaderModule(frag, device);
+
+        const vertShaderStageInfo: c.VkPipelineShaderStageCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = c.VK_SHADER_STAGE_VERTEX_BIT,
+            .module = vertModule,
+            .pName = "main",
+        };
+
+        const fragShaderStageInfo: c.VkPipelineShaderStageCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = fragModule,
+            .pName = "main",
+        };
+
+        var shaderStages = std.ArrayList(c.VkPipelineShaderStageCreateInfo).init(allocator);
+        defer shaderStages.deinit();
+
+        try shaderStages.append(vertShaderStageInfo);
+        try shaderStages.append(fragShaderStageInfo);
+
+        const vertexInputInfo: c.VkPipelineVertexInputStateCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            .vertexBindingDescriptionCount = 0,
+            .pVertexBindingDescriptions = null,
+            .vertexAttributeDescriptionCount = 0,
+            .pVertexAttributeDescriptions = null,
+        };
+
+        const inputAssembly: c.VkPipelineInputAssemblyStateCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            .primitiveRestartEnable = c.VK_FALSE,
+        };
+
+        const viewPortState: c.VkPipelineViewportStateCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .viewportCount = 1,
+            .scissorCount = 1,
+        };
+
+        const rasterizer: c.VkPipelineRasterizationStateCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .depthClampEnable = c.VK_FALSE,
+            .rasterizerDiscardEnable = c.VK_FALSE,
+            .polygonMode = c.VK_POLYGON_MODE_FILL,
+            .lineWidth = 1.0,
+            .cullMode = c.VK_CULL_MODE_BACK_BIT,
+            .frontFace = c.VK_FRONT_FACE_CLOCKWISE,
+            .depthBiasEnable = c.VK_FALSE,
+        };
+
+        const multisampling: c.VkPipelineMultisampleStateCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .sampleShadingEnable = c.VK_FALSE,
+            .rasterizationSamples = c.VK_SAMPLE_COUNT_1_BIT,
+        };
+
+        const colorBlendAttachment: c.VkPipelineColorBlendAttachmentState = .{
+            .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
+            .blendEnable = c.VK_FALSE,
+        };
+
+        const colorBlending: c.VkPipelineColorBlendStateCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .logicOpEnable = c.VK_FALSE,
+            .attachmentCount = 1,
+            .pAttachments = &colorBlendAttachment,
+        };
+
+        const pipelineLayoutInfo: c.VkPipelineLayoutCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        };
+
+        var pipelineLayout: c.VkPipelineLayout = undefined;
+        try utils.checkSuccess(c.vkCreatePipelineLayout(device, &pipelineLayoutInfo, null, &pipelineLayout));
+
+        const dynamicState: c.VkPipelineDynamicStateCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .dynamicStateCount = @intCast(dynamicStates.len),
+            .pDynamicStates = @ptrCast(@constCast(&dynamicStates)),
+        };
+
+        _ = vertexInputInfo;
+        _ = inputAssembly;
+        _ = viewPortState;
+        _ = rasterizer;
+        _ = multisampling;
+        _ = colorBlending;
+        _ = dynamicState;
+
+        c.vkDestroyShaderModule(device, vertModule, null);
+        c.vkDestroyShaderModule(device, fragModule, null);
+
+        return pipelineLayout;
     }
 };
