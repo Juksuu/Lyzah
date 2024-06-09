@@ -37,6 +37,8 @@
             glfw
             wayland
 
+            shaderc
+
             vulkan-loader
             vulkan-headers
             vulkan-tools-lunarg
