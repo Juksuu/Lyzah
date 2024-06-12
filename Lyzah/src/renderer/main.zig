@@ -61,6 +61,12 @@ const SwapChainData = struct {
     imageViews: std.ArrayList(c.VkImageView),
 };
 
+const GraphicsPipelineData = struct {
+    renderPass: c.VkRenderPass,
+    layout: c.VkPipelineLayout,
+    pipeline: c.VkPipeline,
+};
+
 pub const RendererSpec = struct {
     name: [*c]const u8,
     allocator: Allocator,
@@ -77,7 +83,10 @@ pub const Renderer = struct {
     presentQueue: c.VkQueue,
     surface: c.VkSurfaceKHR,
     swapChainData: SwapChainData,
-    pipelineLayout: c.VkPipelineLayout,
+    graphicsPipelineData: GraphicsPipelineData,
+    frameBuffers: std.ArrayList(c.VkFramebuffer),
+    commandPool: c.VkCommandPool,
+    commandBuffer: c.VkCommandBuffer,
 
     pub fn init(spec: RendererSpec, glfwWindow: *c.GLFWwindow) !Renderer {
         if (enableValidationLayers and !(try utils.checkValidationLayerSupport(spec.allocator, @constCast(&validationLayers)))) {
@@ -100,9 +109,15 @@ pub const Renderer = struct {
         const deviceData = try createLogicalDevice(spec.allocator, physicalDevice, surface);
         const swapChainData = try createSwapChain(spec.allocator, physicalDevice, surface, deviceData.device, glfwWindow);
 
-        const pipelineLayout = try createGraphicsPipeline(spec.allocator, deviceData.device);
+        const renderPass = try createRenderPass(deviceData.device, swapChainData.imageFormat);
+        const graphicsPipelineData = try createGraphicsPipeline(spec.allocator, deviceData.device, renderPass);
 
-        return .{
+        const frameBuffers = try createFrameBuffers(spec.allocator, deviceData.device, renderPass, swapChainData);
+
+        const commandPool = try createCommandPool(spec.allocator, physicalDevice, deviceData.device, surface);
+        const commandBuffer = try createCommandBuffer(deviceData.device, commandPool);
+
+        return Renderer{
             .allocator = spec.allocator,
             .instance = instance,
             .debugMessenger = debugMessenger,
@@ -112,7 +127,10 @@ pub const Renderer = struct {
             .presentQueue = deviceData.presentQueue,
             .surface = surface,
             .swapChainData = swapChainData,
-            .pipelineLayout = pipelineLayout,
+            .graphicsPipelineData = graphicsPipelineData,
+            .frameBuffers = frameBuffers,
+            .commandPool = commandPool,
+            .commandBuffer = commandBuffer,
         };
     }
 
@@ -121,7 +139,13 @@ pub const Renderer = struct {
             self.destroyDebugMessenger();
         }
 
-        c.vkDestroyPipelineLayout(self.device, self.pipelineLayout, null);
+        for (self.frameBuffers.items) |frameBuffer| {
+            c.vkDestroyFramebuffer(self.device, frameBuffer, null);
+        }
+
+        c.vkDestroyPipeline(self.device, self.graphicsPipelineData.pipeline, null);
+        c.vkDestroyPipelineLayout(self.device, self.graphicsPipelineData.layout, null);
+        c.vkDestroyRenderPass(self.device, self.graphicsPipelineData.renderPass, null);
 
         for (self.swapChainData.imageViews.items) |imageView| {
             c.vkDestroyImageView(self.device, imageView, null);
@@ -501,7 +525,44 @@ pub const Renderer = struct {
         };
     }
 
-    fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice) !c.VkPipelineLayout {
+    fn createRenderPass(device: c.VkDevice, swapchainImageFormat: c.VkFormat) !c.VkRenderPass {
+        const colorAttachment: c.VkAttachmentDescription = .{
+            .format = swapchainImageFormat,
+            .samples = c.VK_SAMPLE_COUNT_1_BIT,
+            .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
+            .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
+            .finalLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        };
+
+        const colorAttachmentRef: c.VkAttachmentReference = .{
+            .attachment = 0,
+            .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        };
+
+        const subpass: c.VkSubpassDescription = .{
+            .pipelineBindPoint = c.VK_PIPELINE_BIND_POINT_GRAPHICS,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &colorAttachmentRef,
+        };
+
+        const renderPassInfo: c.VkRenderPassCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+            .attachmentCount = 1,
+            .pAttachments = &colorAttachment,
+            .subpassCount = 1,
+            .pSubpasses = &subpass,
+        };
+
+        var renderPass: c.VkRenderPass = undefined;
+        try utils.checkSuccess(c.vkCreateRenderPass(device, &renderPassInfo, null, &renderPass));
+
+        return renderPass;
+    }
+
+    fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, renderPass: c.VkRenderPass) !GraphicsPipelineData {
         const vert = try utils.readFileToBuffer(allocator, "shaders/vert.spv");
         const frag = try utils.readFileToBuffer(allocator, "shaders/frag.spv");
 
@@ -522,11 +583,7 @@ pub const Renderer = struct {
             .pName = "main",
         };
 
-        var shaderStages = std.ArrayList(c.VkPipelineShaderStageCreateInfo).init(allocator);
-        defer shaderStages.deinit();
-
-        try shaderStages.append(vertShaderStageInfo);
-        try shaderStages.append(fragShaderStageInfo);
+        const shaderStages = [_]c.VkPipelineShaderStageCreateInfo{ vertShaderStageInfo, fragShaderStageInfo };
 
         const vertexInputInfo: c.VkPipelineVertexInputStateCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -590,17 +647,135 @@ pub const Renderer = struct {
             .pDynamicStates = @ptrCast(@constCast(&dynamicStates)),
         };
 
-        _ = vertexInputInfo;
-        _ = inputAssembly;
-        _ = viewPortState;
-        _ = rasterizer;
-        _ = multisampling;
-        _ = colorBlending;
-        _ = dynamicState;
+        const pipelineInfo: c.VkGraphicsPipelineCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .stageCount = 2,
+            .pStages = &shaderStages,
+            .pVertexInputState = &vertexInputInfo,
+            .pInputAssemblyState = &inputAssembly,
+            .pViewportState = &viewPortState,
+            .pRasterizationState = &rasterizer,
+            .pMultisampleState = &multisampling,
+            .pColorBlendState = &colorBlending,
+            .pDynamicState = &dynamicState,
+            .layout = pipelineLayout,
+            .renderPass = renderPass,
+            .subpass = 0,
+        };
+
+        var graphicsPipeline: c.VkPipeline = undefined;
+        try utils.checkSuccess(c.vkCreateGraphicsPipelines(device, null, 1, &pipelineInfo, null, &graphicsPipeline));
 
         c.vkDestroyShaderModule(device, vertModule, null);
         c.vkDestroyShaderModule(device, fragModule, null);
 
-        return pipelineLayout;
+        return GraphicsPipelineData{
+            .layout = pipelineLayout,
+            .renderPass = renderPass,
+            .pipeline = graphicsPipeline,
+        };
+    }
+
+    fn createFrameBuffers(allocator: Allocator, device: c.VkDevice, renderPass: c.VkRenderPass, swapChainData: SwapChainData) !std.ArrayList(c.VkFramebuffer) {
+        var swapChainFrameBuffers = std.ArrayList(c.VkFramebuffer).init(allocator);
+        try swapChainFrameBuffers.resize(swapChainData.imageViews.items.len);
+
+        for (swapChainData.imageViews.items, 0..) |imageView, i| {
+            const attachments = [_]c.VkImageView{imageView};
+
+            const frameBufferCreateInfo: c.VkFramebufferCreateInfo = .{
+                .sType = c.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+                .renderPass = renderPass,
+                .attachmentCount = 1,
+                .pAttachments = &attachments,
+                .width = swapChainData.extent.width,
+                .height = swapChainData.extent.height,
+                .layers = 1,
+            };
+
+            try utils.checkSuccess(c.vkCreateFramebuffer(device, &frameBufferCreateInfo, null, &swapChainFrameBuffers.items[i]));
+        }
+
+        return swapChainFrameBuffers;
+    }
+
+    fn createCommandPool(allocator: Allocator, physicalDevice: c.VkPhysicalDevice, device: c.VkDevice, surface: c.VkSurfaceKHR) !c.VkCommandPool {
+        const queueFamilyIndices = try findQueueFamilies(allocator, physicalDevice, surface);
+
+        const poolInfo: c.VkCommandPoolCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = c.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = queueFamilyIndices.graphicsFamily.?,
+        };
+
+        var commandPool: c.VkCommandPool = undefined;
+        try utils.checkSuccess(c.vkCreateCommandPool(device, &poolInfo, null, &commandPool));
+
+        return commandPool;
+    }
+
+    fn createCommandBuffer(device: c.VkDevice, commandPool: c.VkCommandPool) !c.VkCommandBuffer {
+        const allocInfo: c.VkCommandBufferAllocateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = commandPool,
+            .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        };
+
+        var commandBuffer: c.VkCommandBuffer = undefined;
+        try utils.checkSuccess(c.vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer));
+
+        return commandBuffer;
+    }
+
+    pub fn recordCommandBuffer(self: *Renderer, imageIndex: u32) void {
+        const beginInfo: c.VkCommandBufferBeginInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        };
+
+        try utils.checkSuccess(c.vkBeginCommandBuffer(self.commandBuffer, &beginInfo));
+
+        const clearColor = [1]c.VkClearValue{c.VkClearValue{
+            .color = c.VkClearColorValue{ .float32 = [_]f32{ 0, 0, 0, 1 } },
+        }};
+        const renderPassInfo: c.VkRenderPassBeginInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+            .renderPass = self.graphicsPipelineData.renderPass,
+            .framebuffer = self.frameBuffers.items[imageIndex],
+            .renderArea = .{
+                .offset = c.VkOffset2D{ .x = 0, .y = 0 },
+                .extent = self.swapChainData.extent,
+            },
+            .clearValueCount = 1,
+            .pClearValues = &clearColor,
+        };
+
+        c.vkCmdBeginRenderPass(self.commandBuffer, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
+
+        c.vkCmdBindPipeline(self.commandBuffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphicsPipelineData.pipeline);
+
+        const viewPort: c.VkViewport = .{
+            .x = 0,
+            .y = 0,
+            .width = self.swapChainData.extent.width,
+            .height = self.swapChainData.extent.height,
+            .minDepth = 0,
+            .maxDepth = 1,
+        };
+
+        c.vkCmdSetViewport(self.commandBuffer, 0, 1, &viewPort);
+
+        const scissor: c.VkRect2D = .{
+            .offset = c.VkOffset2D{ .x = 0, .y = 0 },
+            .extent = self.swapChainData.extent,
+        };
+
+        c.vkCmdSetScissor(self.commandBuffer, 0, 1, &scissor);
+
+        c.vkCmdDraw(self.commandBuffer, 3, 1, 0, 0);
+
+        c.vkCmdEndRenderPass(self.commandBuffer);
+
+        try utils.checkSuccess(c.vkEndCommandBuffer(self.commandBuffer));
     }
 };
