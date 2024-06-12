@@ -39,9 +39,12 @@ pub const Application = struct {
         if (deinit_status == .leak) @panic("Leaked memory");
     }
 
-    pub fn run(self: *Application) void {
-        while (self.window.shouldClose()) {
+    pub fn run(self: *Application) !void {
+        while (!self.window.shouldClose()) {
             self.window.pollEvents();
+            try self.renderer.drawFrame();
         }
+
+        try self.renderer.waitForDevice();
     }
 };

@@ -41,7 +41,7 @@ pub const Window = struct {
     }
 
     pub fn shouldClose(self: *Window) bool {
-        return c.glfwWindowShouldClose(self.glfw_window) == c.GLFW_FALSE;
+        return c.glfwWindowShouldClose(self.glfw_window) == c.GLFW_TRUE;
     }
 
     pub fn pollEvents(self: *Window) void {

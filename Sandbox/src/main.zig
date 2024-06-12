@@ -5,5 +5,5 @@ pub fn main() !void {
     var application = try lyzah.Application.init();
     defer application.destroy();
 
-    application.run();
+    try application.run();
 }

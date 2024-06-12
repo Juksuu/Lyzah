@@ -67,6 +67,12 @@ const GraphicsPipelineData = struct {
     pipeline: c.VkPipeline,
 };
 
+const SyncObjects = struct {
+    imageAvailableSemaphore: c.VkSemaphore,
+    renderFinishedSemaphore: c.VkSemaphore,
+    inFlightFence: c.VkFence,
+};
+
 pub const RendererSpec = struct {
     name: [*c]const u8,
     allocator: Allocator,
@@ -87,6 +93,7 @@ pub const Renderer = struct {
     frameBuffers: std.ArrayList(c.VkFramebuffer),
     commandPool: c.VkCommandPool,
     commandBuffer: c.VkCommandBuffer,
+    syncObjects: SyncObjects,
 
     pub fn init(spec: RendererSpec, glfwWindow: *c.GLFWwindow) !Renderer {
         if (enableValidationLayers and !(try utils.checkValidationLayerSupport(spec.allocator, @constCast(&validationLayers)))) {
@@ -117,6 +124,8 @@ pub const Renderer = struct {
         const commandPool = try createCommandPool(spec.allocator, physicalDevice, deviceData.device, surface);
         const commandBuffer = try createCommandBuffer(deviceData.device, commandPool);
 
+        const syncObjects = try createSyncObjects(deviceData.device);
+
         return Renderer{
             .allocator = spec.allocator,
             .instance = instance,
@@ -131,6 +140,7 @@ pub const Renderer = struct {
             .frameBuffers = frameBuffers,
             .commandPool = commandPool,
             .commandBuffer = commandBuffer,
+            .syncObjects = syncObjects,
         };
     }
 
@@ -138,6 +148,12 @@ pub const Renderer = struct {
         if (enableValidationLayers) {
             self.destroyDebugMessenger();
         }
+
+        c.vkDestroySemaphore(self.device, self.syncObjects.imageAvailableSemaphore, null);
+        c.vkDestroySemaphore(self.device, self.syncObjects.renderFinishedSemaphore, null);
+        c.vkDestroyFence(self.device, self.syncObjects.inFlightFence, null);
+
+        c.vkDestroyCommandPool(self.device, self.commandPool, null);
 
         for (self.frameBuffers.items) |frameBuffer| {
             c.vkDestroyFramebuffer(self.device, frameBuffer, null);
@@ -155,9 +171,6 @@ pub const Renderer = struct {
         c.vkDestroyDevice(self.device, null);
         c.vkDestroySurfaceKHR(self.instance, self.surface, null);
         c.vkDestroyInstance(self.instance, null);
-
-        self.swapChainData.images.deinit();
-        self.swapChainData.imageViews.deinit();
     }
 
     fn createInstance(allocator: Allocator, required_extensions: [][*:0]const u8, appInfo: c.VkApplicationInfo) !c.VkInstance {
@@ -548,12 +561,23 @@ pub const Renderer = struct {
             .pColorAttachments = &colorAttachmentRef,
         };
 
+        const dependency: c.VkSubpassDependency = .{
+            .srcSubpass = c.VK_SUBPASS_EXTERNAL,
+            .dstSubpass = 0,
+            .srcStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask = 0,
+            .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        };
+
         const renderPassInfo: c.VkRenderPassCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
             .attachmentCount = 1,
             .pAttachments = &colorAttachment,
             .subpassCount = 1,
             .pSubpasses = &subpass,
+            .dependencyCount = 1,
+            .pDependencies = &dependency,
         };
 
         var renderPass: c.VkRenderPass = undefined;
@@ -728,7 +752,7 @@ pub const Renderer = struct {
         return commandBuffer;
     }
 
-    pub fn recordCommandBuffer(self: *Renderer, imageIndex: u32) void {
+    pub fn recordCommandBuffer(self: *Renderer, imageIndex: u32) !void {
         const beginInfo: c.VkCommandBufferBeginInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         };
@@ -757,8 +781,8 @@ pub const Renderer = struct {
         const viewPort: c.VkViewport = .{
             .x = 0,
             .y = 0,
-            .width = self.swapChainData.extent.width,
-            .height = self.swapChainData.extent.height,
+            .width = @floatFromInt(self.swapChainData.extent.width),
+            .height = @floatFromInt(self.swapChainData.extent.height),
             .minDepth = 0,
             .maxDepth = 1,
         };
@@ -777,5 +801,77 @@ pub const Renderer = struct {
         c.vkCmdEndRenderPass(self.commandBuffer);
 
         try utils.checkSuccess(c.vkEndCommandBuffer(self.commandBuffer));
+    }
+
+    fn createSyncObjects(device: c.VkDevice) !SyncObjects {
+        const semaphoreInfo: c.VkSemaphoreCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        };
+
+        const fenceInfo: c.VkFenceCreateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .flags = c.VK_FENCE_CREATE_SIGNALED_BIT,
+        };
+
+        var imageAvailableSemaphore: c.VkSemaphore = undefined;
+        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphoreInfo, null, &imageAvailableSemaphore));
+
+        var renderFinishedSemaphore: c.VkSemaphore = undefined;
+        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphoreInfo, null, &renderFinishedSemaphore));
+
+        var inFlightFence: c.VkFence = undefined;
+        try utils.checkSuccess(c.vkCreateFence(device, &fenceInfo, null, &inFlightFence));
+
+        return SyncObjects{
+            .imageAvailableSemaphore = imageAvailableSemaphore,
+            .renderFinishedSemaphore = renderFinishedSemaphore,
+            .inFlightFence = inFlightFence,
+        };
+    }
+
+    pub fn drawFrame(self: *Renderer) !void {
+        try utils.checkSuccess(c.vkWaitForFences(self.device, 1, &self.syncObjects.inFlightFence, c.VK_TRUE, maxInt(u64)));
+        try utils.checkSuccess(c.vkResetFences(self.device, 1, &self.syncObjects.inFlightFence));
+
+        var imageIndex: u32 = undefined;
+        try utils.checkSuccess(c.vkAcquireNextImageKHR(self.device, self.swapChainData.swapChain, maxInt(u64), self.syncObjects.imageAvailableSemaphore, null, &imageIndex));
+
+        try utils.checkSuccess(c.vkResetCommandBuffer(self.commandBuffer, 0));
+
+        try self.recordCommandBuffer(imageIndex);
+
+        const waitSemaphores = [_]c.VkSemaphore{self.syncObjects.imageAvailableSemaphore};
+        const waitStages = [_]c.VkPipelineStageFlags{c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+        const signalSemaphores = [_]c.VkSemaphore{self.syncObjects.renderFinishedSemaphore};
+
+        const submitInfo: c.VkSubmitInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &waitSemaphores,
+            .pWaitDstStageMask = &waitStages,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &self.commandBuffer,
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = &signalSemaphores,
+        };
+
+        try utils.checkSuccess(c.vkQueueSubmit(self.graphicsQueue.?, 1, &submitInfo, self.syncObjects.inFlightFence));
+
+        const swapChains = [_]c.VkSwapchainKHR{self.swapChainData.swapChain};
+        const presentInfo: c.VkPresentInfoKHR = .{
+            .sType = c.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &signalSemaphores,
+            .swapchainCount = 1,
+            .pSwapchains = &swapChains,
+            .pImageIndices = &imageIndex,
+        };
+
+        try utils.checkSuccess(c.vkQueuePresentKHR(self.presentQueue, &presentInfo));
+    }
+
+    pub fn waitForDevice(self: *Renderer) !void {
+        try utils.checkSuccess(c.vkDeviceWaitIdle(self.device));
     }
 };
