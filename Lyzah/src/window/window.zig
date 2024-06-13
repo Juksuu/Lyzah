@@ -1,7 +1,7 @@
 const std = @import("std");
 const c = @import("../c.zig");
 
-pub const utils = @import("utils.zig");
+const utils = @import("utils.zig");
 
 pub const WindowSpec = struct {
     width: u16,

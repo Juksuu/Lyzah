@@ -1,7 +1,9 @@
 const std = @import("std");
 
-const window = @import("./window/main.zig");
-const renderer = @import("./renderer/main.zig");
+const window = @import("window/window.zig");
+const window_utils = @import("window/utils.zig");
+
+const renderer = @import("renderer/renderer.zig");
 
 pub const Application = struct {
     gpa: std.heap.GeneralPurposeAllocator(.{}),
@@ -26,7 +28,7 @@ pub const Application = struct {
             .renderer = try renderer.Renderer.init(.{
                 .name = "Lyzah",
                 .allocator = allocator,
-                .required_extensions = window.utils.getRequiredInstanceExtensions(),
+                .required_extensions = window_utils.getRequiredInstanceExtensions(),
             }, w.glfw_window),
         };
     }
