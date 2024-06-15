@@ -44,7 +44,7 @@ pub const Application = struct {
     pub fn run(self: *Application) !void {
         while (!self.window.shouldClose()) {
             self.window.pollEvents();
-            try self.renderer.drawFrame();
+            try self.renderer.drawFrame(self.window.glfw_window);
         }
 
         try self.renderer.waitForDevice();
