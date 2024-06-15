@@ -2,4 +2,4 @@
 *zig-cache
 *zig-out
 
-Sandbox/shaders/*.spv
+*.spv

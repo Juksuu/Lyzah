@@ -1,8 +1,8 @@
 const std = @import("std");
-const lyzah = @import("lyzah");
+const Application = @import("Lyzah").Application;
 
 pub fn main() !void {
-    var application = try lyzah.Application.init();
+    var application = try Application.init();
     defer application.destroy();
 
     try application.run();

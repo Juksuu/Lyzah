@@ -6,71 +6,71 @@ const utils = @import("utils.zig");
 const maxInt = std.math.maxInt;
 const Allocator = std.mem.Allocator;
 
-const enableValidationLayers = std.debug.runtime_safety;
-const validationLayers = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
+const ENABLE_VALIDATION_LAYERS = std.debug.runtime_safety;
+const VALIDATION_LAYERS = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
 
-const deviceExtensions = [_][*:0]const u8{c.VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-const dynamicStates = [_]c_int{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
+const DEVICE_EXTENSIONS = [_][*:0]const u8{c.VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+const DYNAMIC_STATES = [_]c_int{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
 
 const QueueFamilyIndices = struct {
-    graphicsFamily: ?u32,
-    presentFamily: ?u32,
+    graphics_family: ?u32,
+    present_family: ?u32,
 
     fn init() QueueFamilyIndices {
         return QueueFamilyIndices{
-            .graphicsFamily = null,
-            .presentFamily = null,
+            .graphics_family = null,
+            .present_family = null,
         };
     }
 
     fn isComplete(self: QueueFamilyIndices) bool {
-        return self.graphicsFamily != null and self.presentFamily != null;
+        return self.graphics_family != null and self.present_family != null;
     }
 };
 
-const SwapChainSupportDetails = struct {
+const SwapchainSupportDetails = struct {
     capabilities: c.VkSurfaceCapabilitiesKHR,
     formats: std.ArrayList(c.VkSurfaceFormatKHR),
-    presentModes: std.ArrayList(c.VkPresentModeKHR),
+    present_modes: std.ArrayList(c.VkPresentModeKHR),
 
-    fn init(allocator: Allocator) SwapChainSupportDetails {
-        return SwapChainSupportDetails{
+    fn init(allocator: Allocator) SwapchainSupportDetails {
+        return SwapchainSupportDetails{
             .capabilities = undefined,
             .formats = std.ArrayList(c.VkSurfaceFormatKHR).init(allocator),
-            .presentModes = std.ArrayList(c.VkPresentModeKHR).init(allocator),
+            .present_modes = std.ArrayList(c.VkPresentModeKHR).init(allocator),
         };
     }
 
-    fn deinit(self: *SwapChainSupportDetails) void {
+    fn deinit(self: *SwapchainSupportDetails) void {
         self.formats.deinit();
-        self.presentModes.deinit();
+        self.present_modes.deinit();
     }
 };
 
 const LogicalDeviceData = struct {
     device: c.VkDevice,
-    graphicsQueue: c.VkQueue,
-    presentQueue: c.VkQueue,
+    graphics_queue: c.VkQueue,
+    present_queue: c.VkQueue,
 };
 
-const SwapChainData = struct {
-    swapChain: c.VkSwapchainKHR,
+const SwapchainData = struct {
+    swapchain: c.VkSwapchainKHR,
     images: std.ArrayList(c.VkImage),
-    imageFormat: c.VkFormat,
+    image_format: c.VkFormat,
     extent: c.VkExtent2D,
-    imageViews: std.ArrayList(c.VkImageView),
+    image_views: std.ArrayList(c.VkImageView),
 };
 
 const GraphicsPipelineData = struct {
-    renderPass: c.VkRenderPass,
+    render_pass: c.VkRenderPass,
     layout: c.VkPipelineLayout,
     pipeline: c.VkPipeline,
 };
 
 const SyncObjects = struct {
-    imageAvailableSemaphore: c.VkSemaphore,
-    renderFinishedSemaphore: c.VkSemaphore,
-    inFlightFence: c.VkFence,
+    image_available_semaphore: c.VkSemaphore,
+    render_finished_semaphore: c.VkSemaphore,
+    in_flight_fence: c.VkFence,
 };
 
 pub const RendererSpec = struct {
@@ -82,25 +82,25 @@ pub const RendererSpec = struct {
 pub const Renderer = struct {
     allocator: Allocator,
     instance: c.VkInstance,
-    debugMessenger: c.VkDebugUtilsMessengerEXT,
-    physicalDevice: c.VkPhysicalDevice,
+    debug_messenger: c.VkDebugUtilsMessengerEXT,
+    physical_device: c.VkPhysicalDevice,
     device: c.VkDevice,
-    graphicsQueue: c.VkQueue,
-    presentQueue: c.VkQueue,
+    graphics_queue: c.VkQueue,
+    present_queue: c.VkQueue,
     surface: c.VkSurfaceKHR,
-    swapChainData: SwapChainData,
-    graphicsPipelineData: GraphicsPipelineData,
-    frameBuffers: std.ArrayList(c.VkFramebuffer),
-    commandPool: c.VkCommandPool,
-    commandBuffer: c.VkCommandBuffer,
-    syncObjects: SyncObjects,
+    swapchain_data: SwapchainData,
+    graphics_pipeline_data: GraphicsPipelineData,
+    frame_buffers: std.ArrayList(c.VkFramebuffer),
+    command_pool: c.VkCommandPool,
+    command_buffer: c.VkCommandBuffer,
+    sync_objects: SyncObjects,
 
-    pub fn init(spec: RendererSpec, glfwWindow: *c.GLFWwindow) !Renderer {
-        if (enableValidationLayers and !(try utils.checkValidationLayerSupport(spec.allocator, @constCast(&validationLayers)))) {
+    pub fn init(spec: RendererSpec, glfw_window: *c.GLFWwindow) !Renderer {
+        if (ENABLE_VALIDATION_LAYERS and !(try utils.checkValidationLayerSupport(spec.allocator, @constCast(&VALIDATION_LAYERS)))) {
             return error.VulkanValidationLayersRequestedButNotAvailable;
         }
 
-        const appInfo = c.VkApplicationInfo{
+        const app_info = c.VkApplicationInfo{
             .sType = c.VK_STRUCTURE_TYPE_APPLICATION_INFO,
             .pApplicationName = spec.name,
             .applicationVersion = c.VK_MAKE_VERSION(0, 1, 0),
@@ -109,92 +109,92 @@ pub const Renderer = struct {
             .apiVersion = c.VK_API_VERSION_1_3,
         };
 
-        const instance = try createInstance(spec.allocator, spec.required_extensions, appInfo);
-        const debugMessenger = try setupDebugCallback(instance);
-        const surface = try createSurface(instance, glfwWindow);
-        const physicalDevice = try pickPhysicalDevice(spec.allocator, instance, surface);
-        const deviceData = try createLogicalDevice(spec.allocator, physicalDevice, surface);
-        const swapChainData = try createSwapChain(spec.allocator, physicalDevice, surface, deviceData.device, glfwWindow);
+        const instance = try createInstance(spec.allocator, spec.required_extensions, app_info);
+        const debug_messenger = try setupDebugCallback(instance);
+        const surface = try createSurface(instance, glfw_window);
+        const physical_device = try pickPhysicalDevice(spec.allocator, instance, surface);
+        const device_data = try createLogicalDevice(spec.allocator, physical_device, surface);
+        const swapchain_data = try createSwapChain(spec.allocator, physical_device, surface, device_data.device, glfw_window);
 
-        const renderPass = try createRenderPass(deviceData.device, swapChainData.imageFormat);
-        const graphicsPipelineData = try createGraphicsPipeline(spec.allocator, deviceData.device, renderPass);
+        const render_pass = try createRenderPass(device_data.device, swapchain_data.image_format);
+        const graphics_pipeline_data = try createGraphicsPipeline(spec.allocator, device_data.device, render_pass);
 
-        const frameBuffers = try createFrameBuffers(spec.allocator, deviceData.device, renderPass, swapChainData);
+        const frame_buffers = try createFrameBuffers(spec.allocator, device_data.device, render_pass, swapchain_data);
 
-        const commandPool = try createCommandPool(spec.allocator, physicalDevice, deviceData.device, surface);
-        const commandBuffer = try createCommandBuffer(deviceData.device, commandPool);
+        const command_pool = try createCommandPool(spec.allocator, physical_device, device_data.device, surface);
+        const command_buffer = try createCommandBuffer(device_data.device, command_pool);
 
-        const syncObjects = try createSyncObjects(deviceData.device);
+        const sync_objects = try createSyncObjects(device_data.device);
 
         return Renderer{
             .allocator = spec.allocator,
             .instance = instance,
-            .debugMessenger = debugMessenger,
-            .physicalDevice = physicalDevice,
-            .device = deviceData.device,
-            .graphicsQueue = deviceData.graphicsQueue,
-            .presentQueue = deviceData.presentQueue,
+            .debug_messenger = debug_messenger,
+            .physical_device = physical_device,
+            .device = device_data.device,
+            .graphics_queue = device_data.graphics_queue,
+            .present_queue = device_data.present_queue,
             .surface = surface,
-            .swapChainData = swapChainData,
-            .graphicsPipelineData = graphicsPipelineData,
-            .frameBuffers = frameBuffers,
-            .commandPool = commandPool,
-            .commandBuffer = commandBuffer,
-            .syncObjects = syncObjects,
+            .swapchain_data = swapchain_data,
+            .graphics_pipeline_data = graphics_pipeline_data,
+            .frame_buffers = frame_buffers,
+            .command_pool = command_pool,
+            .command_buffer = command_buffer,
+            .sync_objects = sync_objects,
         };
     }
 
     pub fn destroy(self: *Renderer) void {
-        if (enableValidationLayers) {
+        if (ENABLE_VALIDATION_LAYERS) {
             self.destroyDebugMessenger();
         }
 
-        c.vkDestroySemaphore(self.device, self.syncObjects.imageAvailableSemaphore, null);
-        c.vkDestroySemaphore(self.device, self.syncObjects.renderFinishedSemaphore, null);
-        c.vkDestroyFence(self.device, self.syncObjects.inFlightFence, null);
+        c.vkDestroySemaphore(self.device, self.sync_objects.image_available_semaphore, null);
+        c.vkDestroySemaphore(self.device, self.sync_objects.render_finished_semaphore, null);
+        c.vkDestroyFence(self.device, self.sync_objects.in_flight_fence, null);
 
-        c.vkDestroyCommandPool(self.device, self.commandPool, null);
+        c.vkDestroyCommandPool(self.device, self.command_pool, null);
 
-        for (self.frameBuffers.items) |frameBuffer| {
-            c.vkDestroyFramebuffer(self.device, frameBuffer, null);
+        for (self.frame_buffers.items) |frame_buffer| {
+            c.vkDestroyFramebuffer(self.device, frame_buffer, null);
         }
 
-        c.vkDestroyPipeline(self.device, self.graphicsPipelineData.pipeline, null);
-        c.vkDestroyPipelineLayout(self.device, self.graphicsPipelineData.layout, null);
-        c.vkDestroyRenderPass(self.device, self.graphicsPipelineData.renderPass, null);
+        c.vkDestroyPipeline(self.device, self.graphics_pipeline_data.pipeline, null);
+        c.vkDestroyPipelineLayout(self.device, self.graphics_pipeline_data.layout, null);
+        c.vkDestroyRenderPass(self.device, self.graphics_pipeline_data.render_pass, null);
 
-        for (self.swapChainData.imageViews.items) |imageView| {
-            c.vkDestroyImageView(self.device, imageView, null);
+        for (self.swapchain_data.image_views.items) |image_view| {
+            c.vkDestroyImageView(self.device, image_view, null);
         }
 
-        c.vkDestroySwapchainKHR(self.device, self.swapChainData.swapChain, null);
+        c.vkDestroySwapchainKHR(self.device, self.swapchain_data.swapchain, null);
         c.vkDestroyDevice(self.device, null);
         c.vkDestroySurfaceKHR(self.instance, self.surface, null);
         c.vkDestroyInstance(self.instance, null);
     }
 
-    fn createInstance(allocator: Allocator, required_extensions: [][*:0]const u8, appInfo: c.VkApplicationInfo) !c.VkInstance {
+    fn createInstance(allocator: Allocator, required_extensions: [][*:0]const u8, app_info: c.VkApplicationInfo) !c.VkInstance {
         const extensions = try addDebugExtension(allocator, required_extensions);
 
-        var createInfo = c.VkInstanceCreateInfo{
+        var create_info = c.VkInstanceCreateInfo{
             .sType = c.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-            .pApplicationInfo = &appInfo,
+            .pApplicationInfo = &app_info,
             .enabledExtensionCount = @intCast(extensions.len),
             .ppEnabledExtensionNames = @ptrCast(extensions),
         };
 
-        if (enableValidationLayers) {
-            createInfo.enabledLayerCount = validationLayers.len;
-            createInfo.ppEnabledLayerNames = @ptrCast(&validationLayers);
+        if (ENABLE_VALIDATION_LAYERS) {
+            create_info.enabledLayerCount = VALIDATION_LAYERS.len;
+            create_info.ppEnabledLayerNames = @ptrCast(&VALIDATION_LAYERS);
 
-            var debugCreateInfo = createDebugMessengerCreateInfo();
-            createInfo.pNext = &debugCreateInfo;
+            var debug_create_info = createDebugMessengerCreateInfo();
+            create_info.pNext = &debug_create_info;
         } else {
-            createInfo.enabledLayerCount = 0;
+            create_info.enabledLayerCount = 0;
         }
 
         var instance: c.VkInstance = null;
-        try utils.checkSuccess(c.vkCreateInstance(&createInfo, null, &instance));
+        try utils.checkSuccess(c.vkCreateInstance(&create_info, null, &instance));
 
         return instance;
     }
@@ -205,7 +205,7 @@ pub const Renderer = struct {
 
         try extensions.appendSlice(required_extensions[0..required_extensions.len]);
 
-        if (enableValidationLayers) {
+        if (ENABLE_VALIDATION_LAYERS) {
             try extensions.append(c.VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         }
 
@@ -213,38 +213,38 @@ pub const Renderer = struct {
     }
 
     fn createDebugMessengerCreateInfo() c.VkDebugUtilsMessengerCreateInfoEXT {
-        const createInfo = c.VkDebugUtilsMessengerCreateInfoEXT{
+        const create_info = c.VkDebugUtilsMessengerCreateInfoEXT{
             .sType = c.VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
             .messageSeverity = c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
             .messageType = c.VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | c.VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | c.VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
             .pfnUserCallback = utils.debugCallback,
             .pUserData = null,
         };
-        return createInfo;
+        return create_info;
     }
 
     fn setupDebugCallback(instance: c.VkInstance) !c.VkDebugUtilsMessengerEXT {
-        if (!enableValidationLayers) return;
+        if (!ENABLE_VALIDATION_LAYERS) return;
 
-        var createInfo = createDebugMessengerCreateInfo();
+        var create_info = createDebugMessengerCreateInfo();
 
-        var debugMessenger: c.VkDebugUtilsMessengerEXT = null;
-        try utils.checkSuccess(try createDebugMessenger(instance, &createInfo, &debugMessenger));
-        return debugMessenger;
+        var debug_messenger: c.VkDebugUtilsMessengerEXT = null;
+        try utils.checkSuccess(try createDebugMessenger(instance, &create_info, &debug_messenger));
+        return debug_messenger;
     }
 
     fn createDebugMessenger(
         instance: c.VkInstance,
-        pCreateInfo: *const c.VkDebugUtilsMessengerCreateInfoEXT,
-        pDebugMessenger: *c.VkDebugUtilsMessengerEXT,
+        p_create_info: *const c.VkDebugUtilsMessengerCreateInfoEXT,
+        p_debug_messenger: *c.VkDebugUtilsMessengerEXT,
     ) !c.VkResult {
-        const funcOpt = @as(c.PFN_vkCreateDebugUtilsMessengerEXT, @ptrCast(c.vkGetInstanceProcAddr(
+        const func_opt = @as(c.PFN_vkCreateDebugUtilsMessengerEXT, @ptrCast(c.vkGetInstanceProcAddr(
             instance,
             "vkCreateDebugUtilsMessengerEXT",
         )));
 
-        if (funcOpt) |func| {
-            return func(instance, pCreateInfo, null, pDebugMessenger);
+        if (func_opt) |func| {
+            return func(instance, p_create_info, null, p_debug_messenger);
         }
 
         return error.VulkanDebugExtensionNotPresent;
@@ -257,20 +257,21 @@ pub const Renderer = struct {
             self.instance,
             "vkDestroyDebugUtilsMessengerEXT",
         ))) orelse unreachable;
-        func(self.instance, self.debugMessenger, null);
+        func(self.instance, self.debug_messenger, null);
     }
 
     fn pickPhysicalDevice(allocator: Allocator, instance: c.VkInstance, surface: c.VkSurfaceKHR) !c.VkPhysicalDevice {
-        var deviceCount: u32 = 0;
-        try utils.checkSuccess(c.vkEnumeratePhysicalDevices(instance, &deviceCount, null));
+        var device_count: u32 = 0;
+        try utils.checkSuccess(c.vkEnumeratePhysicalDevices(instance, &device_count, null));
 
-        if (deviceCount == 0) {
+        if (device_count == 0) {
             return error.NoGPUWithVulkanSupport;
         }
 
-        const devices = try allocator.alloc(c.VkPhysicalDevice, deviceCount);
+        const devices = try allocator.alloc(c.VkPhysicalDevice, device_count);
         defer allocator.free(devices);
-        try utils.checkSuccess(c.vkEnumeratePhysicalDevices(instance, &deviceCount, devices.ptr));
+
+        try utils.checkSuccess(c.vkEnumeratePhysicalDevices(instance, &device_count, devices.ptr));
 
         return for (devices) |device| {
             if (try isDeviceSuitable(allocator, device, surface)) {
@@ -279,41 +280,42 @@ pub const Renderer = struct {
         } else return error.NoSuitableGPU;
     }
 
-    fn isDeviceSuitable(allocator: Allocator, device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !bool {
-        const indices = try findQueueFamilies(allocator, device, surface);
-        const extensionsSupported = try utils.checkDeviceExtensionSupport(allocator, device, @constCast(&deviceExtensions));
+    fn isDeviceSuitable(allocator: Allocator, physical_device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !bool {
+        const indices = try findQueueFamilies(allocator, physical_device, surface);
+        const extensions_supported = try utils.checkDeviceExtensionSupport(allocator, physical_device, @constCast(&DEVICE_EXTENSIONS));
 
-        var swapChainAdequate = false;
-        if (extensionsSupported) {
-            var swapChainSupport = try querySwapChainSupport(allocator, device, surface);
-            defer swapChainSupport.deinit();
-            swapChainAdequate = swapChainSupport.formats.items.len > 0 and swapChainSupport.presentModes.items.len > 0;
+        var swapchain_adequate = false;
+        if (extensions_supported) {
+            var swapchain_support = try querySwapChainSupport(allocator, physical_device, surface);
+            defer swapchain_support.deinit();
+
+            swapchain_adequate = swapchain_support.formats.items.len > 0 and swapchain_support.present_modes.items.len > 0;
         }
 
-        return indices.isComplete() and swapChainAdequate;
+        return indices.isComplete() and swapchain_adequate;
     }
 
-    fn findQueueFamilies(allocator: Allocator, device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !QueueFamilyIndices {
+    fn findQueueFamilies(allocator: Allocator, physical_device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !QueueFamilyIndices {
         var indices = QueueFamilyIndices.init();
 
-        var queueFamilyCount: u32 = 0;
-        c.vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, null);
+        var queue_family_count: u32 = 0;
+        c.vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
 
-        const queueFamilies = try allocator.alloc(c.VkQueueFamilyProperties, queueFamilyCount);
-        defer allocator.free(queueFamilies);
+        const queue_families = try allocator.alloc(c.VkQueueFamilyProperties, queue_family_count);
+        defer allocator.free(queue_families);
 
-        c.vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.ptr);
+        c.vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.ptr);
 
-        for (0.., queueFamilies) |i, family| {
+        for (0.., queue_families) |i, family| {
             if ((family.queueFlags & c.VK_QUEUE_GRAPHICS_BIT) != 0) {
-                indices.graphicsFamily = @truncate(i);
+                indices.graphics_family = @truncate(i);
             }
 
-            var presentSupport: c.VkBool32 = c.VK_FALSE;
-            try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceSupportKHR(device, @truncate(i), surface, &presentSupport));
+            var present_support: c.VkBool32 = c.VK_FALSE;
+            try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, @truncate(i), surface, &present_support));
 
-            if (presentSupport == c.VK_TRUE) {
-                indices.presentFamily = @truncate(i);
+            if (present_support == c.VK_TRUE) {
+                indices.present_family = @truncate(i);
             }
 
             if (indices.isComplete()) {
@@ -324,58 +326,58 @@ pub const Renderer = struct {
         return indices;
     }
 
-    fn createLogicalDevice(allocator: Allocator, physicalDevice: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !LogicalDeviceData {
-        const indices = try findQueueFamilies(allocator, physicalDevice, surface);
+    fn createLogicalDevice(allocator: Allocator, physical_device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !LogicalDeviceData {
+        const indices = try findQueueFamilies(allocator, physical_device, surface);
 
-        var queueCreateInfos = std.ArrayList(c.VkDeviceQueueCreateInfo).init(allocator);
-        queueCreateInfos.deinit();
+        var queue_create_infos = std.ArrayList(c.VkDeviceQueueCreateInfo).init(allocator);
+        queue_create_infos.deinit();
 
-        const allQueueFamilies = [_]u32{ indices.graphicsFamily.?, indices.presentFamily.? };
-        const uniqueQueueFamilies = if (indices.graphicsFamily.? == indices.presentFamily.?)
-            allQueueFamilies[0..1]
+        const all_queue_families = [_]u32{ indices.graphics_family.?, indices.present_family.? };
+        const unique_queue_families = if (indices.graphics_family.? == indices.present_family.?)
+            all_queue_families[0..1]
         else
-            allQueueFamilies[0..2];
+            all_queue_families[0..2];
 
-        const queuePriority: f32 = 1.0;
-        for (uniqueQueueFamilies) |queueFamily| {
-            const queueCreateInfo: c.VkDeviceQueueCreateInfo = .{
+        const queue_priority: f32 = 1.0;
+        for (unique_queue_families) |queue_family| {
+            const queue_create_info: c.VkDeviceQueueCreateInfo = .{
                 .sType = c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                .queueFamilyIndex = queueFamily,
+                .queueFamilyIndex = queue_family,
                 .queueCount = 1,
-                .pQueuePriorities = &queuePriority,
+                .pQueuePriorities = &queue_priority,
             };
 
-            try queueCreateInfos.append(queueCreateInfo);
+            try queue_create_infos.append(queue_create_info);
         }
 
-        var deviceFeatures: c.VkPhysicalDeviceFeatures = .{};
+        var device_features: c.VkPhysicalDeviceFeatures = .{};
 
-        var deviceCreateInfo: c.VkDeviceCreateInfo = .{
+        var device_create_info: c.VkDeviceCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            .pQueueCreateInfos = queueCreateInfos.items.ptr,
-            .queueCreateInfoCount = @truncate(queueCreateInfos.items.len),
-            .pEnabledFeatures = &deviceFeatures,
-            .enabledExtensionCount = @intCast(deviceExtensions.len),
-            .ppEnabledExtensionNames = &deviceExtensions,
+            .pQueueCreateInfos = queue_create_infos.items.ptr,
+            .queueCreateInfoCount = @truncate(queue_create_infos.items.len),
+            .pEnabledFeatures = &device_features,
+            .enabledExtensionCount = @intCast(DEVICE_EXTENSIONS.len),
+            .ppEnabledExtensionNames = &DEVICE_EXTENSIONS,
         };
 
-        if (enableValidationLayers) {
-            deviceCreateInfo.enabledLayerCount = validationLayers.len;
-            deviceCreateInfo.ppEnabledLayerNames = @ptrCast(&validationLayers);
+        if (ENABLE_VALIDATION_LAYERS) {
+            device_create_info.enabledLayerCount = VALIDATION_LAYERS.len;
+            device_create_info.ppEnabledLayerNames = @ptrCast(&VALIDATION_LAYERS);
         } else {
-            deviceCreateInfo.enabledLayerCount = 0;
+            device_create_info.enabledLayerCount = 0;
         }
 
         var device: c.VkDevice = null;
-        try utils.checkSuccess(c.vkCreateDevice(physicalDevice, &deviceCreateInfo, null, &device));
+        try utils.checkSuccess(c.vkCreateDevice(physical_device, &device_create_info, null, &device));
 
-        var graphicsQueue: c.VkQueue = null;
-        c.vkGetDeviceQueue(device, indices.graphicsFamily.?, 0, &graphicsQueue);
+        var graphics_queue: c.VkQueue = null;
+        c.vkGetDeviceQueue(device, indices.graphics_family.?, 0, &graphics_queue);
 
-        var presentQueue: c.VkQueue = null;
-        c.vkGetDeviceQueue(device, indices.presentFamily.?, 0, &presentQueue);
+        var present_queue: c.VkQueue = null;
+        c.vkGetDeviceQueue(device, indices.present_family.?, 0, &present_queue);
 
-        return .{ .device = device, .graphicsQueue = graphicsQueue, .presentQueue = presentQueue };
+        return .{ .device = device, .graphics_queue = graphics_queue, .present_queue = present_queue };
     }
 
     fn createSurface(instance: c.VkInstance, window: *c.GLFWwindow) !c.VkSurfaceKHR {
@@ -384,43 +386,43 @@ pub const Renderer = struct {
         return surface;
     }
 
-    fn querySwapChainSupport(allocator: Allocator, device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !SwapChainSupportDetails {
-        var details = SwapChainSupportDetails.init(allocator);
-        try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities));
+    fn querySwapChainSupport(allocator: Allocator, physical_device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !SwapchainSupportDetails {
+        var details = SwapchainSupportDetails.init(allocator);
+        try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &details.capabilities));
 
-        var formatCount: u32 = 0;
-        try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, null));
+        var format_count: u32 = 0;
+        try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, null));
 
-        if (formatCount != 0) {
-            try details.formats.resize(formatCount);
-            try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.items.ptr));
+        if (format_count != 0) {
+            try details.formats.resize(format_count);
+            try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, details.formats.items.ptr));
         }
 
-        var presentModeCount: u32 = 0;
-        try utils.checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, null));
+        var present_mode_count: u32 = 0;
+        try utils.checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_mode_count, null));
 
-        if (presentModeCount != 0) {
-            try details.presentModes.resize(presentModeCount);
-            try utils.checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.items.ptr));
+        if (present_mode_count != 0) {
+            try details.present_modes.resize(present_mode_count);
+            try utils.checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_mode_count, details.present_modes.items.ptr));
         }
 
         return details;
     }
 
-    fn chooseSwapSurfaceFormat(availableFormats: std.ArrayList(c.VkSurfaceFormatKHR)) c.VkSurfaceFormatKHR {
-        for (availableFormats.items) |format| {
+    fn chooseSwapSurfaceFormat(available_formats: std.ArrayList(c.VkSurfaceFormatKHR)) c.VkSurfaceFormatKHR {
+        for (available_formats.items) |format| {
             if (format.format == c.VK_FORMAT_B8G8R8A8_SRGB and format.colorSpace == c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
                 return format;
             }
         }
 
-        return availableFormats.items[0];
+        return available_formats.items[0];
     }
 
-    fn chooseSwapPresentMode(availablePresentModes: std.ArrayList(c.VkPresentModeKHR)) c.VkPresentModeKHR {
-        for (availablePresentModes.items) |presentMode| {
-            if (presentMode == c.VK_PRESENT_MODE_MAILBOX_KHR) {
-                return presentMode;
+    fn chooseSwapPresentMode(available_present_modes: std.ArrayList(c.VkPresentModeKHR)) c.VkPresentModeKHR {
+        for (available_present_modes.items) |present_mode| {
+            if (present_mode == c.VK_PRESENT_MODE_MAILBOX_KHR) {
+                return present_mode;
             }
         }
 
@@ -435,73 +437,73 @@ pub const Renderer = struct {
             var height: c_int = undefined;
             c.glfwGetFramebufferSize(window, &width, &height);
 
-            var actualExtent = c.VkExtent2D{
+            var actual_extent = c.VkExtent2D{
                 .width = @intCast(width),
                 .height = @intCast(height),
             };
 
-            actualExtent.width = std.math.clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-            actualExtent.height = std.math.clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
-            return actualExtent;
+            actual_extent.width = std.math.clamp(actual_extent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+            actual_extent.height = std.math.clamp(actual_extent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+            return actual_extent;
         }
     }
 
-    fn createSwapChain(allocator: Allocator, physicalDevice: c.VkPhysicalDevice, surface: c.VkSurfaceKHR, device: c.VkDevice, window: *c.GLFWwindow) !SwapChainData {
-        var swapChainSupportDetails = try querySwapChainSupport(allocator, physicalDevice, surface);
-        defer swapChainSupportDetails.deinit();
+    fn createSwapChain(allocator: Allocator, physical_device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR, device: c.VkDevice, window: *c.GLFWwindow) !SwapchainData {
+        var swapchain_support_details = try querySwapChainSupport(allocator, physical_device, surface);
+        defer swapchain_support_details.deinit();
 
-        const surfaceFormat = chooseSwapSurfaceFormat(swapChainSupportDetails.formats);
-        const presentMode = chooseSwapPresentMode(swapChainSupportDetails.presentModes);
-        const extent = chooseSwapExtent(swapChainSupportDetails.capabilities, window);
+        const surface_format = chooseSwapSurfaceFormat(swapchain_support_details.formats);
+        const present_mode = chooseSwapPresentMode(swapchain_support_details.present_modes);
+        const extent = chooseSwapExtent(swapchain_support_details.capabilities, window);
 
-        var imageCount = swapChainSupportDetails.capabilities.minImageCount + 1;
-        const maxImageCount = swapChainSupportDetails.capabilities.maxImageCount;
+        var image_count = swapchain_support_details.capabilities.minImageCount + 1;
+        const max_image_count = swapchain_support_details.capabilities.maxImageCount;
 
-        if (maxImageCount > 0 and imageCount > maxImageCount) {
-            imageCount = maxImageCount;
+        if (max_image_count > 0 and image_count > max_image_count) {
+            image_count = max_image_count;
         }
 
-        var createInfo: c.VkSwapchainCreateInfoKHR = .{
+        var create_info: c.VkSwapchainCreateInfoKHR = .{
             .sType = c.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
             .surface = surface,
-            .minImageCount = imageCount,
-            .imageFormat = surfaceFormat.format,
-            .imageColorSpace = surfaceFormat.colorSpace,
+            .minImageCount = image_count,
+            .imageFormat = surface_format.format,
+            .imageColorSpace = surface_format.colorSpace,
             .imageExtent = extent,
             .imageArrayLayers = 1,
             .imageUsage = c.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-            .preTransform = swapChainSupportDetails.capabilities.currentTransform,
+            .preTransform = swapchain_support_details.capabilities.currentTransform,
             .compositeAlpha = c.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-            .presentMode = presentMode,
+            .presentMode = present_mode,
             .clipped = c.VK_TRUE,
             .oldSwapchain = null,
         };
 
-        const indices = try findQueueFamilies(allocator, physicalDevice, surface);
-        const queueFamilyIndices = [_]u32{ indices.graphicsFamily.?, indices.presentFamily.? };
+        const indices = try findQueueFamilies(allocator, physical_device, surface);
+        const queue_family_indices = [_]u32{ indices.graphics_family.?, indices.present_family.? };
 
-        if (indices.graphicsFamily != indices.presentFamily) {
-            createInfo.imageSharingMode = c.VK_SHARING_MODE_CONCURRENT;
-            createInfo.queueFamilyIndexCount = 2;
-            createInfo.pQueueFamilyIndices = &queueFamilyIndices;
+        if (indices.graphics_family != indices.present_family) {
+            create_info.imageSharingMode = c.VK_SHARING_MODE_CONCURRENT;
+            create_info.queueFamilyIndexCount = 2;
+            create_info.pQueueFamilyIndices = &queue_family_indices;
         } else {
-            createInfo.imageSharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
-            createInfo.queueFamilyIndexCount = 0;
-            createInfo.pQueueFamilyIndices = null;
+            create_info.imageSharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
+            create_info.queueFamilyIndexCount = 0;
+            create_info.pQueueFamilyIndices = null;
         }
 
-        var swapChain: c.VkSwapchainKHR = undefined;
-        try utils.checkSuccess(c.vkCreateSwapchainKHR(device, &createInfo, null, &swapChain));
+        var swapchain: c.VkSwapchainKHR = undefined;
+        try utils.checkSuccess(c.vkCreateSwapchainKHR(device, &create_info, null, &swapchain));
 
-        var swapChainImages = std.ArrayList(c.VkImage).init(allocator);
-        try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapChain, &imageCount, null));
-        try swapChainImages.resize(imageCount);
-        try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapChain, &imageCount, swapChainImages.items.ptr));
+        var swapchain_images = std.ArrayList(c.VkImage).init(allocator);
+        try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapchain, &image_count, null));
+        try swapchain_images.resize(image_count);
+        try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapchain, &image_count, swapchain_images.items.ptr));
 
-        var swapChainImageViews = std.ArrayList(c.VkImageView).init(allocator);
-        try swapChainImageViews.resize(swapChainImages.items.len);
+        var swapchain_image_views = std.ArrayList(c.VkImageView).init(allocator);
+        try swapchain_image_views.resize(swapchain_images.items.len);
 
-        for (0..swapChainImages.items.len) |i| {
+        for (0..swapchain_images.items.len) |i| {
             const components: c.VkComponentMapping = .{
                 .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
                 .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -509,7 +511,7 @@ pub const Renderer = struct {
                 .a = c.VK_COMPONENT_SWIZZLE_IDENTITY,
             };
 
-            const subresourceRange: c.VkImageSubresourceRange = .{
+            const subresource_range: c.VkImageSubresourceRange = .{
                 .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
                 .baseMipLevel = 0,
                 .levelCount = 1,
@@ -517,30 +519,30 @@ pub const Renderer = struct {
                 .layerCount = 1,
             };
 
-            var imageViewCreateInfo: c.VkImageViewCreateInfo = .{
+            var image_view_create_info: c.VkImageViewCreateInfo = .{
                 .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .image = swapChainImages.items[i],
+                .image = swapchain_images.items[i],
                 .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
-                .format = surfaceFormat.format,
+                .format = surface_format.format,
                 .components = components,
-                .subresourceRange = subresourceRange,
+                .subresourceRange = subresource_range,
             };
 
-            try utils.checkSuccess(c.vkCreateImageView(device, &imageViewCreateInfo, null, &swapChainImageViews.items[i]));
+            try utils.checkSuccess(c.vkCreateImageView(device, &image_view_create_info, null, &swapchain_image_views.items[i]));
         }
 
-        return SwapChainData{
-            .swapChain = swapChain,
-            .imageFormat = surfaceFormat.format,
+        return SwapchainData{
+            .swapchain = swapchain,
+            .image_format = surface_format.format,
             .extent = extent,
-            .images = swapChainImages,
-            .imageViews = swapChainImageViews,
+            .images = swapchain_images,
+            .image_views = swapchain_image_views,
         };
     }
 
-    fn createRenderPass(device: c.VkDevice, swapchainImageFormat: c.VkFormat) !c.VkRenderPass {
-        const colorAttachment: c.VkAttachmentDescription = .{
-            .format = swapchainImageFormat,
+    fn createRenderPass(device: c.VkDevice, swapchain_image_format: c.VkFormat) !c.VkRenderPass {
+        const color_attachment: c.VkAttachmentDescription = .{
+            .format = swapchain_image_format,
             .samples = c.VK_SAMPLE_COUNT_1_BIT,
             .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
@@ -550,7 +552,7 @@ pub const Renderer = struct {
             .finalLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         };
 
-        const colorAttachmentRef: c.VkAttachmentReference = .{
+        const color_attachment_ref: c.VkAttachmentReference = .{
             .attachment = 0,
             .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         };
@@ -558,7 +560,7 @@ pub const Renderer = struct {
         const subpass: c.VkSubpassDescription = .{
             .pipelineBindPoint = c.VK_PIPELINE_BIND_POINT_GRAPHICS,
             .colorAttachmentCount = 1,
-            .pColorAttachments = &colorAttachmentRef,
+            .pColorAttachments = &color_attachment_ref,
         };
 
         const dependency: c.VkSubpassDependency = .{
@@ -570,46 +572,46 @@ pub const Renderer = struct {
             .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
         };
 
-        const renderPassInfo: c.VkRenderPassCreateInfo = .{
+        const render_pass_info: c.VkRenderPassCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
             .attachmentCount = 1,
-            .pAttachments = &colorAttachment,
+            .pAttachments = &color_attachment,
             .subpassCount = 1,
             .pSubpasses = &subpass,
             .dependencyCount = 1,
             .pDependencies = &dependency,
         };
 
-        var renderPass: c.VkRenderPass = undefined;
-        try utils.checkSuccess(c.vkCreateRenderPass(device, &renderPassInfo, null, &renderPass));
+        var render_pass: c.VkRenderPass = undefined;
+        try utils.checkSuccess(c.vkCreateRenderPass(device, &render_pass_info, null, &render_pass));
 
-        return renderPass;
+        return render_pass;
     }
 
-    fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, renderPass: c.VkRenderPass) !GraphicsPipelineData {
+    fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass: c.VkRenderPass) !GraphicsPipelineData {
         const vert = try utils.readFileToBuffer(allocator, "shaders/vert.spv");
         const frag = try utils.readFileToBuffer(allocator, "shaders/frag.spv");
 
-        const vertModule = try utils.createShaderModule(vert, device);
-        const fragModule = try utils.createShaderModule(frag, device);
+        const vert_module = try utils.createShaderModule(vert, device);
+        const frag_module = try utils.createShaderModule(frag, device);
 
-        const vertShaderStageInfo: c.VkPipelineShaderStageCreateInfo = .{
+        const vert_shader_stage_info: c.VkPipelineShaderStageCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = c.VK_SHADER_STAGE_VERTEX_BIT,
-            .module = vertModule,
+            .module = vert_module,
             .pName = "main",
         };
 
-        const fragShaderStageInfo: c.VkPipelineShaderStageCreateInfo = .{
+        const frag_shader_stage_info: c.VkPipelineShaderStageCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT,
-            .module = fragModule,
+            .module = frag_module,
             .pName = "main",
         };
 
-        const shaderStages = [_]c.VkPipelineShaderStageCreateInfo{ vertShaderStageInfo, fragShaderStageInfo };
+        const shader_stages = [_]c.VkPipelineShaderStageCreateInfo{ vert_shader_stage_info, frag_shader_stage_info };
 
-        const vertexInputInfo: c.VkPipelineVertexInputStateCreateInfo = .{
+        const vertex_input_info: c.VkPipelineVertexInputStateCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
             .vertexBindingDescriptionCount = 0,
             .pVertexBindingDescriptions = null,
@@ -617,13 +619,13 @@ pub const Renderer = struct {
             .pVertexAttributeDescriptions = null,
         };
 
-        const inputAssembly: c.VkPipelineInputAssemblyStateCreateInfo = .{
+        const input_assembly: c.VkPipelineInputAssemblyStateCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
             .primitiveRestartEnable = c.VK_FALSE,
         };
 
-        const viewPortState: c.VkPipelineViewportStateCreateInfo = .{
+        const viewport_state: c.VkPipelineViewportStateCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
             .viewportCount = 1,
             .scissorCount = 1,
@@ -646,229 +648,229 @@ pub const Renderer = struct {
             .rasterizationSamples = c.VK_SAMPLE_COUNT_1_BIT,
         };
 
-        const colorBlendAttachment: c.VkPipelineColorBlendAttachmentState = .{
+        const color_blend_attachment: c.VkPipelineColorBlendAttachmentState = .{
             .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
             .blendEnable = c.VK_FALSE,
         };
 
-        const colorBlending: c.VkPipelineColorBlendStateCreateInfo = .{
+        const color_blending: c.VkPipelineColorBlendStateCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             .logicOpEnable = c.VK_FALSE,
             .attachmentCount = 1,
-            .pAttachments = &colorBlendAttachment,
+            .pAttachments = &color_blend_attachment,
         };
 
-        const pipelineLayoutInfo: c.VkPipelineLayoutCreateInfo = .{
+        const pipeline_layout_info: c.VkPipelineLayoutCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         };
 
-        var pipelineLayout: c.VkPipelineLayout = undefined;
-        try utils.checkSuccess(c.vkCreatePipelineLayout(device, &pipelineLayoutInfo, null, &pipelineLayout));
+        var pipeline_layout: c.VkPipelineLayout = undefined;
+        try utils.checkSuccess(c.vkCreatePipelineLayout(device, &pipeline_layout_info, null, &pipeline_layout));
 
-        const dynamicState: c.VkPipelineDynamicStateCreateInfo = .{
+        const dynamic_state: c.VkPipelineDynamicStateCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-            .dynamicStateCount = @intCast(dynamicStates.len),
-            .pDynamicStates = @ptrCast(@constCast(&dynamicStates)),
+            .dynamicStateCount = @intCast(DYNAMIC_STATES.len),
+            .pDynamicStates = @ptrCast(@constCast(&DYNAMIC_STATES)),
         };
 
-        const pipelineInfo: c.VkGraphicsPipelineCreateInfo = .{
+        const pipeline_info: c.VkGraphicsPipelineCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
             .stageCount = 2,
-            .pStages = &shaderStages,
-            .pVertexInputState = &vertexInputInfo,
-            .pInputAssemblyState = &inputAssembly,
-            .pViewportState = &viewPortState,
+            .pStages = &shader_stages,
+            .pVertexInputState = &vertex_input_info,
+            .pInputAssemblyState = &input_assembly,
+            .pViewportState = &viewport_state,
             .pRasterizationState = &rasterizer,
             .pMultisampleState = &multisampling,
-            .pColorBlendState = &colorBlending,
-            .pDynamicState = &dynamicState,
-            .layout = pipelineLayout,
-            .renderPass = renderPass,
+            .pColorBlendState = &color_blending,
+            .pDynamicState = &dynamic_state,
+            .layout = pipeline_layout,
+            .renderPass = render_pass,
             .subpass = 0,
         };
 
-        var graphicsPipeline: c.VkPipeline = undefined;
-        try utils.checkSuccess(c.vkCreateGraphicsPipelines(device, null, 1, &pipelineInfo, null, &graphicsPipeline));
+        var graphics_pipeline: c.VkPipeline = undefined;
+        try utils.checkSuccess(c.vkCreateGraphicsPipelines(device, null, 1, &pipeline_info, null, &graphics_pipeline));
 
-        c.vkDestroyShaderModule(device, vertModule, null);
-        c.vkDestroyShaderModule(device, fragModule, null);
+        c.vkDestroyShaderModule(device, vert_module, null);
+        c.vkDestroyShaderModule(device, frag_module, null);
 
         return GraphicsPipelineData{
-            .layout = pipelineLayout,
-            .renderPass = renderPass,
-            .pipeline = graphicsPipeline,
+            .layout = pipeline_layout,
+            .render_pass = render_pass,
+            .pipeline = graphics_pipeline,
         };
     }
 
-    fn createFrameBuffers(allocator: Allocator, device: c.VkDevice, renderPass: c.VkRenderPass, swapChainData: SwapChainData) !std.ArrayList(c.VkFramebuffer) {
-        var swapChainFrameBuffers = std.ArrayList(c.VkFramebuffer).init(allocator);
-        try swapChainFrameBuffers.resize(swapChainData.imageViews.items.len);
+    fn createFrameBuffers(allocator: Allocator, device: c.VkDevice, render_pass: c.VkRenderPass, swapchain_data: SwapchainData) !std.ArrayList(c.VkFramebuffer) {
+        var swapchain_frame_buffers = std.ArrayList(c.VkFramebuffer).init(allocator);
+        try swapchain_frame_buffers.resize(swapchain_data.image_views.items.len);
 
-        for (swapChainData.imageViews.items, 0..) |imageView, i| {
-            const attachments = [_]c.VkImageView{imageView};
+        for (swapchain_data.image_views.items, 0..) |image_view, i| {
+            const attachments = [_]c.VkImageView{image_view};
 
-            const frameBufferCreateInfo: c.VkFramebufferCreateInfo = .{
+            const frame_buffer_create_info: c.VkFramebufferCreateInfo = .{
                 .sType = c.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-                .renderPass = renderPass,
+                .renderPass = render_pass,
                 .attachmentCount = 1,
                 .pAttachments = &attachments,
-                .width = swapChainData.extent.width,
-                .height = swapChainData.extent.height,
+                .width = swapchain_data.extent.width,
+                .height = swapchain_data.extent.height,
                 .layers = 1,
             };
 
-            try utils.checkSuccess(c.vkCreateFramebuffer(device, &frameBufferCreateInfo, null, &swapChainFrameBuffers.items[i]));
+            try utils.checkSuccess(c.vkCreateFramebuffer(device, &frame_buffer_create_info, null, &swapchain_frame_buffers.items[i]));
         }
 
-        return swapChainFrameBuffers;
+        return swapchain_frame_buffers;
     }
 
-    fn createCommandPool(allocator: Allocator, physicalDevice: c.VkPhysicalDevice, device: c.VkDevice, surface: c.VkSurfaceKHR) !c.VkCommandPool {
-        const queueFamilyIndices = try findQueueFamilies(allocator, physicalDevice, surface);
+    fn createCommandPool(allocator: Allocator, physical_device: c.VkPhysicalDevice, device: c.VkDevice, surface: c.VkSurfaceKHR) !c.VkCommandPool {
+        const queue_family_indices = try findQueueFamilies(allocator, physical_device, surface);
 
-        const poolInfo: c.VkCommandPoolCreateInfo = .{
+        const pool_info: c.VkCommandPoolCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
             .flags = c.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            .queueFamilyIndex = queueFamilyIndices.graphicsFamily.?,
+            .queueFamilyIndex = queue_family_indices.graphics_family.?,
         };
 
-        var commandPool: c.VkCommandPool = undefined;
-        try utils.checkSuccess(c.vkCreateCommandPool(device, &poolInfo, null, &commandPool));
+        var command_pool: c.VkCommandPool = undefined;
+        try utils.checkSuccess(c.vkCreateCommandPool(device, &pool_info, null, &command_pool));
 
-        return commandPool;
+        return command_pool;
     }
 
-    fn createCommandBuffer(device: c.VkDevice, commandPool: c.VkCommandPool) !c.VkCommandBuffer {
-        const allocInfo: c.VkCommandBufferAllocateInfo = .{
+    fn createCommandBuffer(device: c.VkDevice, command_pool: c.VkCommandPool) !c.VkCommandBuffer {
+        const alloc_info: c.VkCommandBufferAllocateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = commandPool,
+            .commandPool = command_pool,
             .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
             .commandBufferCount = 1,
         };
 
-        var commandBuffer: c.VkCommandBuffer = undefined;
-        try utils.checkSuccess(c.vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer));
+        var command_buffer: c.VkCommandBuffer = undefined;
+        try utils.checkSuccess(c.vkAllocateCommandBuffers(device, &alloc_info, &command_buffer));
 
-        return commandBuffer;
+        return command_buffer;
     }
 
-    pub fn recordCommandBuffer(self: *Renderer, imageIndex: u32) !void {
-        const beginInfo: c.VkCommandBufferBeginInfo = .{
+    pub fn recordCommandBuffer(self: *Renderer, image_index: u32) !void {
+        const begin_info: c.VkCommandBufferBeginInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         };
 
-        try utils.checkSuccess(c.vkBeginCommandBuffer(self.commandBuffer, &beginInfo));
+        try utils.checkSuccess(c.vkBeginCommandBuffer(self.command_buffer, &begin_info));
 
-        const clearColor = [1]c.VkClearValue{c.VkClearValue{
+        const clear_color = [1]c.VkClearValue{c.VkClearValue{
             .color = c.VkClearColorValue{ .float32 = [_]f32{ 0, 0, 0, 1 } },
         }};
-        const renderPassInfo: c.VkRenderPassBeginInfo = .{
+        const render_pass_info: c.VkRenderPassBeginInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .renderPass = self.graphicsPipelineData.renderPass,
-            .framebuffer = self.frameBuffers.items[imageIndex],
+            .renderPass = self.graphics_pipeline_data.render_pass,
+            .framebuffer = self.frame_buffers.items[image_index],
             .renderArea = .{
                 .offset = c.VkOffset2D{ .x = 0, .y = 0 },
-                .extent = self.swapChainData.extent,
+                .extent = self.swapchain_data.extent,
             },
             .clearValueCount = 1,
-            .pClearValues = &clearColor,
+            .pClearValues = &clear_color,
         };
 
-        c.vkCmdBeginRenderPass(self.commandBuffer, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
+        c.vkCmdBeginRenderPass(self.command_buffer, &render_pass_info, c.VK_SUBPASS_CONTENTS_INLINE);
 
-        c.vkCmdBindPipeline(self.commandBuffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphicsPipelineData.pipeline);
+        c.vkCmdBindPipeline(self.command_buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphics_pipeline_data.pipeline);
 
-        const viewPort: c.VkViewport = .{
+        const viewport: c.VkViewport = .{
             .x = 0,
             .y = 0,
-            .width = @floatFromInt(self.swapChainData.extent.width),
-            .height = @floatFromInt(self.swapChainData.extent.height),
+            .width = @floatFromInt(self.swapchain_data.extent.width),
+            .height = @floatFromInt(self.swapchain_data.extent.height),
             .minDepth = 0,
             .maxDepth = 1,
         };
 
-        c.vkCmdSetViewport(self.commandBuffer, 0, 1, &viewPort);
+        c.vkCmdSetViewport(self.command_buffer, 0, 1, &viewport);
 
         const scissor: c.VkRect2D = .{
             .offset = c.VkOffset2D{ .x = 0, .y = 0 },
-            .extent = self.swapChainData.extent,
+            .extent = self.swapchain_data.extent,
         };
 
-        c.vkCmdSetScissor(self.commandBuffer, 0, 1, &scissor);
+        c.vkCmdSetScissor(self.command_buffer, 0, 1, &scissor);
 
-        c.vkCmdDraw(self.commandBuffer, 3, 1, 0, 0);
+        c.vkCmdDraw(self.command_buffer, 3, 1, 0, 0);
 
-        c.vkCmdEndRenderPass(self.commandBuffer);
+        c.vkCmdEndRenderPass(self.command_buffer);
 
-        try utils.checkSuccess(c.vkEndCommandBuffer(self.commandBuffer));
+        try utils.checkSuccess(c.vkEndCommandBuffer(self.command_buffer));
     }
 
     fn createSyncObjects(device: c.VkDevice) !SyncObjects {
-        const semaphoreInfo: c.VkSemaphoreCreateInfo = .{
+        const semaphore_info: c.VkSemaphoreCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
         };
 
-        const fenceInfo: c.VkFenceCreateInfo = .{
+        const fence_info: c.VkFenceCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
             .flags = c.VK_FENCE_CREATE_SIGNALED_BIT,
         };
 
-        var imageAvailableSemaphore: c.VkSemaphore = undefined;
-        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphoreInfo, null, &imageAvailableSemaphore));
+        var image_available_semaphore: c.VkSemaphore = undefined;
+        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphore_info, null, &image_available_semaphore));
 
-        var renderFinishedSemaphore: c.VkSemaphore = undefined;
-        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphoreInfo, null, &renderFinishedSemaphore));
+        var render_finished_semaphore: c.VkSemaphore = undefined;
+        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphore_info, null, &render_finished_semaphore));
 
-        var inFlightFence: c.VkFence = undefined;
-        try utils.checkSuccess(c.vkCreateFence(device, &fenceInfo, null, &inFlightFence));
+        var in_flight_fence: c.VkFence = undefined;
+        try utils.checkSuccess(c.vkCreateFence(device, &fence_info, null, &in_flight_fence));
 
         return SyncObjects{
-            .imageAvailableSemaphore = imageAvailableSemaphore,
-            .renderFinishedSemaphore = renderFinishedSemaphore,
-            .inFlightFence = inFlightFence,
+            .image_available_semaphore = image_available_semaphore,
+            .render_finished_semaphore = render_finished_semaphore,
+            .in_flight_fence = in_flight_fence,
         };
     }
 
     pub fn drawFrame(self: *Renderer) !void {
-        try utils.checkSuccess(c.vkWaitForFences(self.device, 1, &self.syncObjects.inFlightFence, c.VK_TRUE, maxInt(u64)));
-        try utils.checkSuccess(c.vkResetFences(self.device, 1, &self.syncObjects.inFlightFence));
+        try utils.checkSuccess(c.vkWaitForFences(self.device, 1, &self.sync_objects.in_flight_fence, c.VK_TRUE, maxInt(u64)));
+        try utils.checkSuccess(c.vkResetFences(self.device, 1, &self.sync_objects.in_flight_fence));
 
-        var imageIndex: u32 = undefined;
-        try utils.checkSuccess(c.vkAcquireNextImageKHR(self.device, self.swapChainData.swapChain, maxInt(u64), self.syncObjects.imageAvailableSemaphore, null, &imageIndex));
+        var image_index: u32 = undefined;
+        try utils.checkSuccess(c.vkAcquireNextImageKHR(self.device, self.swapchain_data.swapchain, maxInt(u64), self.sync_objects.image_available_semaphore, null, &image_index));
 
-        try utils.checkSuccess(c.vkResetCommandBuffer(self.commandBuffer, 0));
+        try utils.checkSuccess(c.vkResetCommandBuffer(self.command_buffer, 0));
 
-        try self.recordCommandBuffer(imageIndex);
+        try self.recordCommandBuffer(image_index);
 
-        const waitSemaphores = [_]c.VkSemaphore{self.syncObjects.imageAvailableSemaphore};
-        const waitStages = [_]c.VkPipelineStageFlags{c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        const wait_semaphores = [_]c.VkSemaphore{self.sync_objects.image_available_semaphore};
+        const wait_stages = [_]c.VkPipelineStageFlags{c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
 
-        const signalSemaphores = [_]c.VkSemaphore{self.syncObjects.renderFinishedSemaphore};
+        const signal_semaphores = [_]c.VkSemaphore{self.sync_objects.render_finished_semaphore};
 
-        const submitInfo: c.VkSubmitInfo = .{
+        const submit_info: c.VkSubmitInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &waitSemaphores,
-            .pWaitDstStageMask = &waitStages,
+            .pWaitSemaphores = &wait_semaphores,
+            .pWaitDstStageMask = &wait_stages,
             .commandBufferCount = 1,
-            .pCommandBuffers = &self.commandBuffer,
+            .pCommandBuffers = &self.command_buffer,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &signalSemaphores,
+            .pSignalSemaphores = &signal_semaphores,
         };
 
-        try utils.checkSuccess(c.vkQueueSubmit(self.graphicsQueue.?, 1, &submitInfo, self.syncObjects.inFlightFence));
+        try utils.checkSuccess(c.vkQueueSubmit(self.graphics_queue.?, 1, &submit_info, self.sync_objects.in_flight_fence));
 
-        const swapChains = [_]c.VkSwapchainKHR{self.swapChainData.swapChain};
+        const swapchains = [_]c.VkSwapchainKHR{self.swapchain_data.swapchain};
         const presentInfo: c.VkPresentInfoKHR = .{
             .sType = c.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &signalSemaphores,
+            .pWaitSemaphores = &signal_semaphores,
             .swapchainCount = 1,
-            .pSwapchains = &swapChains,
-            .pImageIndices = &imageIndex,
+            .pSwapchains = &swapchains,
+            .pImageIndices = &image_index,
         };
 
-        try utils.checkSuccess(c.vkQueuePresentKHR(self.presentQueue, &presentInfo));
+        try utils.checkSuccess(c.vkQueuePresentKHR(self.present_queue, &presentInfo));
     }
 
     pub fn waitForDevice(self: *Renderer) !void {

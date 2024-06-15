@@ -11,27 +11,27 @@ pub fn checkSuccess(result: c.VkResult) !void {
 }
 
 pub fn checkValidationLayerSupport(allocator: Allocator, layers: [][*:0]const u8) !bool {
-    var layerCount: u32 = undefined;
-    try checkSuccess(c.vkEnumerateInstanceLayerProperties(&layerCount, null));
+    var layer_count: u32 = undefined;
+    try checkSuccess(c.vkEnumerateInstanceLayerProperties(&layer_count, null));
 
-    const availableLayers = try allocator.alloc(c.VkLayerProperties, layerCount);
-    defer allocator.free(availableLayers);
+    const available_layers = try allocator.alloc(c.VkLayerProperties, layer_count);
+    defer allocator.free(available_layers);
 
-    try checkSuccess(c.vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.ptr));
+    try checkSuccess(c.vkEnumerateInstanceLayerProperties(&layer_count, available_layers.ptr));
 
-    for (layers) |layerName| {
-        var layerFound = false;
+    for (layers) |layer_name| {
+        var layer_found = false;
 
-        for (availableLayers) |layerProperties| {
-            const layerNameWithLength = std.mem.span(layerName);
-            const length = @min(layerNameWithLength.len, layerProperties.layerName.len);
-            if (std.mem.eql(u8, layerNameWithLength, layerProperties.layerName[0..length])) {
-                layerFound = true;
+        for (available_layers) |layer_properties| {
+            const layer_name_with_length = std.mem.span(layer_name);
+            const length = @min(layer_name_with_length.len, layer_properties.layerName.len);
+            if (std.mem.eql(u8, layer_name_with_length, layer_properties.layerName[0..length])) {
+                layer_found = true;
                 break;
             }
         }
 
-        if (!layerFound) {
+        if (!layer_found) {
             return false;
         }
     }
@@ -40,21 +40,21 @@ pub fn checkValidationLayerSupport(allocator: Allocator, layers: [][*:0]const u8
 }
 
 pub fn checkDeviceExtensionSupport(allocator: Allocator, device: c.VkPhysicalDevice, extensions: [][*:0]const u8) !bool {
-    var extensionCount: u32 = undefined;
-    try checkSuccess(c.vkEnumerateDeviceExtensionProperties(device, null, &extensionCount, null));
+    var extension_count: u32 = undefined;
+    try checkSuccess(c.vkEnumerateDeviceExtensionProperties(device, null, &extension_count, null));
 
-    const availableExtensions = try allocator.alloc(c.VkExtensionProperties, extensionCount);
-    defer allocator.free(availableExtensions);
+    const available_extensions = try allocator.alloc(c.VkExtensionProperties, extension_count);
+    defer allocator.free(available_extensions);
 
-    try checkSuccess(c.vkEnumerateDeviceExtensionProperties(device, null, &extensionCount, availableExtensions.ptr));
+    try checkSuccess(c.vkEnumerateDeviceExtensionProperties(device, null, &extension_count, available_extensions.ptr));
 
     for (extensions) |name| {
         var found = false;
 
-        for (availableExtensions) |extension| {
-            const extensionNameWithLength = std.mem.span(name);
-            const length = @min(extensionNameWithLength.len, extension.extensionName.len);
-            if (std.mem.eql(u8, extensionNameWithLength, extension.extensionName[0..length])) {
+        for (available_extensions) |extension| {
+            const extension_name_with_length = std.mem.span(name);
+            const length = @min(extension_name_with_length.len, extension.extensionName.len);
+            if (std.mem.eql(u8, extension_name_with_length, extension.extensionName[0..length])) {
                 found = true;
                 break;
             }
@@ -101,11 +101,11 @@ pub fn debugCallback(
     return c.VK_FALSE;
 }
 
-pub fn readFileToBuffer(allocator: Allocator, filePath: []const u8) ![]u8 {
-    var file = try std.fs.cwd().openFile(filePath, .{ .mode = .read_only });
+pub fn readFileToBuffer(allocator: Allocator, file_path: []const u8) ![]u8 {
+    var file = try std.fs.cwd().openFile(file_path, .{ .mode = .read_only });
 
-    const fileSize = (try file.stat()).size;
-    const buffer = try allocator.alloc(u8, fileSize);
+    const file_size = (try file.stat()).size;
+    const buffer = try allocator.alloc(u8, file_size);
 
     _ = try file.read(buffer);
 
@@ -113,14 +113,14 @@ pub fn readFileToBuffer(allocator: Allocator, filePath: []const u8) ![]u8 {
 }
 
 pub fn createShaderModule(code: []const u8, device: c.VkDevice) !c.VkShaderModule {
-    const createInfo: c.VkShaderModuleCreateInfo = .{
+    const create_info: c.VkShaderModuleCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = code.len,
         .pCode = @alignCast(@ptrCast(code.ptr)),
     };
 
-    var shaderModule: c.VkShaderModule = undefined;
-    try checkSuccess(c.vkCreateShaderModule(device, &createInfo, null, &shaderModule));
+    var shader_module: c.VkShaderModule = undefined;
+    try checkSuccess(c.vkCreateShaderModule(device, &create_info, null, &shader_module));
 
-    return shaderModule;
+    return shader_module;
 }

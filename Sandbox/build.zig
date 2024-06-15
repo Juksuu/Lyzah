@@ -15,9 +15,9 @@ pub fn build(b: *std.Build) !void {
         } },
     });
 
-    const lyzah_dep = b.dependency("lyzah", .{});
+    const lyzah_dep = b.dependency("Lyzah", .{});
 
-    exe.root_module.addImport("lyzah", lyzah_dep.module("lyzah"));
+    exe.root_module.addImport("Lyzah", lyzah_dep.module("Lyzah"));
     exe.linkLibC();
     exe.linkSystemLibrary("glfw");
     exe.linkSystemLibrary("vulkan");
@@ -26,8 +26,8 @@ pub fn build(b: *std.Build) !void {
 
     const shader_step = b.step("shaders", "Compile shaders");
 
-    try addShader(b, shader_step, "shader.vert", "vert.spv");
-    try addShader(b, shader_step, "shader.frag", "frag.spv");
+    try addShader(b, shader_step, "shaders/shader.vert", "shaders/vert.spv");
+    try addShader(b, shader_step, "shaders/shader.frag", "shaders/frag.spv");
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(shader_step);
@@ -40,15 +40,11 @@ pub fn build(b: *std.Build) !void {
     run_step.dependOn(&run_cmd.step);
 }
 
-fn addShader(b: *std.Build, shaderStep: *std.Build.Step, inFile: []const u8, outFile: []const u8) !void {
+fn addShader(b: *std.Build, shader_step: *std.Build.Step, in_file: []const u8, out_file: []const u8) !void {
     // example: glslc shaders/shader.vert -o shaders/shader.vert
 
-    const dirname = "shaders";
-    const inPath = try path.join(b.allocator, &[_][]const u8{ dirname, inFile });
-    const outPath = try path.join(b.allocator, &[_][]const u8{ dirname, outFile });
+    const shader_cmd = b.addSystemCommand(&[_][]const u8{ "glslc", in_file, "-o", out_file });
+    shader_cmd.step.dependOn(b.getInstallStep());
 
-    const runCmd = b.addSystemCommand(&[_][]const u8{ "glslc", inPath, "-o", outPath });
-    runCmd.step.dependOn(b.getInstallStep());
-
-    shaderStep.dependOn(&runCmd.step);
+    shader_step.dependOn(&shader_cmd.step);
 }
