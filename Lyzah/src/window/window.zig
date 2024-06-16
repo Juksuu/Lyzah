@@ -3,6 +3,12 @@ const c = @import("../c.zig");
 
 const utils = @import("utils.zig");
 
+const events = @import("../events/event.zig");
+const Event = events.Event;
+const WindowResizeEvent = events.WindowResizeEvent;
+
+const EventDispatcher = @import("../events/EventDispatcher.zig");
+
 pub const WindowSpec = struct {
     width: u16,
     height: u16,
@@ -11,6 +17,7 @@ pub const WindowSpec = struct {
 
 pub const Window = struct {
     glfw_window: *c.GLFWwindow,
+    spec: WindowSpec,
 
     pub fn init(spec: WindowSpec) !Window {
         _ = c.glfwSetErrorCallback(utils.errorCallback);
@@ -32,7 +39,21 @@ pub const Window = struct {
             null,
         ) orelse return error.WindowInitFailed;
 
-        return Window{ .glfw_window = window };
+        return Window{ .spec = spec, .glfw_window = window };
+    }
+
+    pub fn initWindowEvents(self: *Window) void {
+        const Callbacks = struct {
+            fn frameBufferResized(glfw_window: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
+                _ = glfw_window; // autofix
+                EventDispatcher.onEvent(Event{ .window_resize = WindowResizeEvent{
+                    .width = @intCast(width),
+                    .height = @intCast(height),
+                } });
+            }
+        };
+
+        _ = c.glfwSetFramebufferSizeCallback(self.glfw_window, Callbacks.frameBufferResized);
     }
 
     pub fn destroy(self: *Window) void {

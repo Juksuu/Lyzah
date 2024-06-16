@@ -5,6 +5,9 @@ const window_utils = @import("window/utils.zig");
 
 const renderer = @import("renderer/renderer.zig");
 
+const Event = @import("events/event.zig").Event;
+const EventDispatcher = @import("events/EventDispatcher.zig");
+
 pub const Application = struct {
     gpa: std.heap.GeneralPurposeAllocator(.{}),
     allocator: std.mem.Allocator,
@@ -16,12 +19,17 @@ pub const Application = struct {
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         const allocator = gpa.allocator();
 
-        const w = try window.Window.init(.{
+        EventDispatcher.init(allocator);
+
+        var w = try window.Window.init(.{
             .name = "Lyzah",
             .width = 1280,
             .height = 720,
         });
-        return Application{
+
+        w.initWindowEvents();
+
+        var app = Application{
             .gpa = gpa,
             .allocator = allocator,
             .window = w,
@@ -31,9 +39,29 @@ pub const Application = struct {
                 .required_extensions = window_utils.getRequiredInstanceExtensions(),
             }, w.glfw_window),
         };
+
+        try EventDispatcher.addEventListener(.{
+            .ptr = &app,
+            .func = &onEvent,
+        });
+
+        return app;
+    }
+
+    fn onEvent(ptr: *anyopaque, event: Event) void {
+        var app: *Application = @ptrCast(@alignCast(ptr));
+
+        switch (event) {
+            Event.window_resize => |resize_event| {
+                _ = resize_event; // autofix
+                app.renderer.frame_buffer_resized = true;
+            },
+        }
     }
 
     pub fn destroy(self: *Application) void {
+        EventDispatcher.destroy();
+
         self.renderer.destroy();
         self.window.destroy();
 
