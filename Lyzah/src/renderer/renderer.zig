@@ -915,6 +915,15 @@ pub const Renderer = struct {
     }
 
     fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow) !void {
+        var width: c_int = 0;
+        var height: c_int = 0;
+        c.glfwGetFramebufferSize(window, &width, &height);
+
+        while (width == 0 or height == 0) {
+            c.glfwGetFramebufferSize(window, &width, &height);
+            c.glfwWaitEvents();
+        }
+
         try self.waitForDevice();
 
         self.destroySwapchain();
