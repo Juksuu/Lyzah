@@ -57,10 +57,10 @@ const LogicalDeviceData = struct {
 
 const SwapchainData = struct {
     swapchain: c.VkSwapchainKHR,
-    images: std.ArrayList(c.VkImage),
+    images: []c.VkImage,
     image_format: c.VkFormat,
     extent: c.VkExtent2D,
-    image_views: std.ArrayList(c.VkImageView),
+    image_views: []c.VkImageView,
 };
 
 const GraphicsPipelineData = struct {
@@ -93,7 +93,7 @@ present_queue: c.VkQueue,
 surface: c.VkSurfaceKHR,
 swapchain_data: SwapchainData,
 graphics_pipeline_data: GraphicsPipelineData,
-frame_buffers: std.ArrayList(c.VkFramebuffer),
+frame_buffers: []c.VkFramebuffer,
 command_pool: c.VkCommandPool,
 command_buffers: []c.VkCommandBuffer,
 sync_objects: SyncObjects,
@@ -153,11 +153,11 @@ pub fn init(spec: RendererSpec, glfw_window: *c.GLFWwindow) !Renderer {
 }
 
 fn destroySwapchain(self: *Renderer) void {
-    for (self.frame_buffers.items) |frame_buffer| {
+    for (self.frame_buffers) |frame_buffer| {
         c.vkDestroyFramebuffer(self.device, frame_buffer, null);
     }
 
-    for (self.swapchain_data.image_views.items) |image_view| {
+    for (self.swapchain_data.image_views) |image_view| {
         c.vkDestroyImageView(self.device, image_view, null);
     }
 
@@ -190,6 +190,7 @@ pub fn destroy(self: *Renderer) void {
 
 fn createInstance(allocator: Allocator, required_extensions: [][*:0]const u8, app_info: c.VkApplicationInfo) !c.VkInstance {
     const extensions = try addDebugExtension(allocator, required_extensions);
+    defer allocator.free(extensions);
 
     var create_info = c.VkInstanceCreateInfo{
         .sType = c.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -510,15 +511,14 @@ fn createSwapChain(allocator: Allocator, physical_device: c.VkPhysicalDevice, su
     var swapchain: c.VkSwapchainKHR = undefined;
     try utils.checkSuccess(c.vkCreateSwapchainKHR(device, &create_info, null, &swapchain));
 
-    var swapchain_images = std.ArrayList(c.VkImage).init(allocator);
     try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapchain, &image_count, null));
-    try swapchain_images.resize(image_count);
-    try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapchain, &image_count, swapchain_images.items.ptr));
 
-    var swapchain_image_views = std.ArrayList(c.VkImageView).init(allocator);
-    try swapchain_image_views.resize(swapchain_images.items.len);
+    const swapchain_images = try allocator.alloc(c.VkImage, image_count);
+    try utils.checkSuccess(c.vkGetSwapchainImagesKHR(device, swapchain, &image_count, swapchain_images.ptr));
 
-    for (0..swapchain_images.items.len) |i| {
+    const swapchain_image_views = try allocator.alloc(c.VkImageView, image_count);
+
+    for (0..swapchain_images.len) |i| {
         const components: c.VkComponentMapping = .{
             .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
             .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -536,14 +536,14 @@ fn createSwapChain(allocator: Allocator, physical_device: c.VkPhysicalDevice, su
 
         var image_view_create_info: c.VkImageViewCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = swapchain_images.items[i],
+            .image = swapchain_images[i],
             .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
             .format = surface_format.format,
             .components = components,
             .subresourceRange = subresource_range,
         };
 
-        try utils.checkSuccess(c.vkCreateImageView(device, &image_view_create_info, null, &swapchain_image_views.items[i]));
+        try utils.checkSuccess(c.vkCreateImageView(device, &image_view_create_info, null, &swapchain_image_views[i]));
     }
 
     return SwapchainData{
@@ -717,24 +717,23 @@ fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass:
     };
 }
 
-fn createFrameBuffers(allocator: Allocator, device: c.VkDevice, render_pass: c.VkRenderPass, swapchain_data: SwapchainData) !std.ArrayList(c.VkFramebuffer) {
-    var swapchain_frame_buffers = std.ArrayList(c.VkFramebuffer).init(allocator);
-    try swapchain_frame_buffers.resize(swapchain_data.image_views.items.len);
+fn createFrameBuffers(allocator: Allocator, device: c.VkDevice, render_pass: c.VkRenderPass, swapchain_data: SwapchainData) ![]c.VkFramebuffer {
+    const swapchain_frame_buffers = try allocator.alloc(c.VkFramebuffer, swapchain_data.image_views.len);
 
-    for (swapchain_data.image_views.items, 0..) |image_view, i| {
-        const attachments = [_]c.VkImageView{image_view};
+    for (0..swapchain_data.image_views.len) |i| {
+        const attachments = swapchain_data.image_views[i .. i + 1];
 
         const frame_buffer_create_info: c.VkFramebufferCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .renderPass = render_pass,
             .attachmentCount = 1,
-            .pAttachments = &attachments,
+            .pAttachments = attachments.ptr,
             .width = swapchain_data.extent.width,
             .height = swapchain_data.extent.height,
             .layers = 1,
         };
 
-        try utils.checkSuccess(c.vkCreateFramebuffer(device, &frame_buffer_create_info, null, &swapchain_frame_buffers.items[i]));
+        try utils.checkSuccess(c.vkCreateFramebuffer(device, &frame_buffer_create_info, null, &swapchain_frame_buffers[i]));
     }
 
     return swapchain_frame_buffers;
@@ -783,7 +782,7 @@ pub fn recordCommandBuffer(self: *Renderer, command_buffer: c.VkCommandBuffer, i
     const render_pass_info: c.VkRenderPassBeginInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = self.graphics_pipeline_data.render_pass,
-        .framebuffer = self.frame_buffers.items[image_index],
+        .framebuffer = self.frame_buffers[image_index],
         .renderArea = .{
             .offset = c.VkOffset2D{ .x = 0, .y = 0 },
             .extent = self.swapchain_data.extent,
