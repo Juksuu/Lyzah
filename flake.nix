@@ -30,7 +30,7 @@
       let pkgs = import nixpkgs { inherit overlays system; };
       in rec {
         devShells.default = pkgs.mkShell {
-          nativeBuildInputs = with pkgs; [
+          packages = with pkgs; [
             zigpkgs.master
             zlspkgs.zls
 
@@ -38,6 +38,7 @@
             wayland
 
             shaderc
+            lldb
 
             vulkan-loader
             vulkan-headers
