@@ -607,6 +607,9 @@ fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass:
     const vert = try utils.readFileToBuffer(allocator, "shaders/vert.spv");
     const frag = try utils.readFileToBuffer(allocator, "shaders/frag.spv");
 
+    defer allocator.free(vert);
+    defer allocator.free(frag);
+
     const vert_module = try utils.createShaderModule(vert, device);
     const frag_module = try utils.createShaderModule(frag, device);
 

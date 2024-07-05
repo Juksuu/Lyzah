@@ -103,6 +103,7 @@ pub fn debugCallback(
 
 pub fn readFileToBuffer(allocator: Allocator, file_path: []const u8) ![]u8 {
     var file = try std.fs.cwd().openFile(file_path, .{ .mode = .read_only });
+    defer file.close();
 
     const file_size = (try file.stat()).size;
     const buffer = try allocator.alloc(u8, file_size);
