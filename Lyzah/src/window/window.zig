@@ -57,7 +57,7 @@ pub fn shouldClose(self: *Window) bool {
     return c.glfwWindowShouldClose(self.glfw_window) == c.GLFW_TRUE;
 }
 
-pub fn pollEvents(self: *Window) void {
+pub fn pollEvents(self: Window) void {
     _ = self;
     c.glfwPollEvents();
 }

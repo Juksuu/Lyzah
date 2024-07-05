@@ -43,7 +43,7 @@ const SwapchainSupportDetails = struct {
         };
     }
 
-    fn deinit(self: *SwapchainSupportDetails) void {
+    fn deinit(self: SwapchainSupportDetails) void {
         self.formats.deinit();
         self.present_modes.deinit();
     }
@@ -152,7 +152,7 @@ pub fn init(spec: RendererSpec, glfw_window: *c.GLFWwindow) !Renderer {
     };
 }
 
-fn destroySwapchain(self: *Renderer) void {
+fn destroySwapchain(self: Renderer) void {
     for (self.frame_buffers) |frame_buffer| {
         c.vkDestroyFramebuffer(self.device, frame_buffer, null);
     }
@@ -164,7 +164,7 @@ fn destroySwapchain(self: *Renderer) void {
     c.vkDestroySwapchainKHR(self.device, self.swapchain_data.swapchain, null);
 }
 
-pub fn destroy(self: *Renderer) void {
+pub fn destroy(self: Renderer) void {
     if (ENABLE_VALIDATION_LAYERS) {
         self.destroyDebugMessenger();
     }
@@ -267,7 +267,7 @@ fn createDebugMessenger(
 }
 
 fn destroyDebugMessenger(
-    self: *Renderer,
+    self: Renderer,
 ) void {
     const func = @as(c.PFN_vkDestroyDebugUtilsMessengerEXT, @ptrCast(c.vkGetInstanceProcAddr(
         self.instance,
@@ -769,7 +769,7 @@ fn createCommandBuffers(allocator: Allocator, device: c.VkDevice, command_pool: 
     return command_buffers;
 }
 
-pub fn recordCommandBuffer(self: *Renderer, command_buffer: c.VkCommandBuffer, image_index: u32) !void {
+pub fn recordCommandBuffer(self: Renderer, command_buffer: c.VkCommandBuffer, image_index: u32) !void {
     const begin_info: c.VkCommandBufferBeginInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
     };
@@ -910,7 +910,7 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
     self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-pub fn waitForDevice(self: *Renderer) !void {
+pub fn waitForDevice(self: Renderer) !void {
     try utils.checkSuccess(c.vkDeviceWaitIdle(self.device));
 }
 
