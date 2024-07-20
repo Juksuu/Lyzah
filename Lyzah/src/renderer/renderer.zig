@@ -43,7 +43,7 @@ const SwapchainSupportDetails = struct {
         };
     }
 
-    fn deinit(self: SwapchainSupportDetails) void {
+    fn deinit(self: *SwapchainSupportDetails) void {
         self.formats.deinit();
         self.present_modes.deinit();
     }
@@ -77,7 +77,6 @@ const SyncObjects = struct {
 
 pub const RendererSpec = struct {
     name: [*c]const u8,
-    allocator: Allocator,
     required_extensions: [][*:0]const u8,
 };
 
@@ -101,8 +100,8 @@ sync_objects: SyncObjects,
 current_frame: u32,
 frame_buffer_resized: bool,
 
-pub fn init(spec: RendererSpec, glfw_window: *c.GLFWwindow) !Renderer {
-    if (ENABLE_VALIDATION_LAYERS and !(try utils.checkValidationLayerSupport(spec.allocator, @constCast(&VALIDATION_LAYERS)))) {
+pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow) !Renderer {
+    if (ENABLE_VALIDATION_LAYERS and !(try utils.checkValidationLayerSupport(allocator, @constCast(&VALIDATION_LAYERS)))) {
         return error.VulkanValidationLayersRequestedButNotAvailable;
     }
 
@@ -115,25 +114,25 @@ pub fn init(spec: RendererSpec, glfw_window: *c.GLFWwindow) !Renderer {
         .apiVersion = c.VK_API_VERSION_1_3,
     };
 
-    const instance = try createInstance(spec.allocator, spec.required_extensions, app_info);
+    const instance = try createInstance(allocator, spec.required_extensions, app_info);
     const debug_messenger = try setupDebugCallback(instance);
     const surface = try createSurface(instance, glfw_window);
-    const physical_device = try pickPhysicalDevice(spec.allocator, instance, surface);
-    const device_data = try createLogicalDevice(spec.allocator, physical_device, surface);
-    const swapchain_data = try createSwapChain(spec.allocator, physical_device, surface, device_data.device, glfw_window);
+    const physical_device = try pickPhysicalDevice(std.heap.c_allocator, instance, surface);
+    const device_data = try createLogicalDevice(std.heap.c_allocator, physical_device, surface);
+    const swapchain_data = try createSwapChain(std.heap.c_allocator, physical_device, surface, device_data.device, glfw_window);
 
     const render_pass = try createRenderPass(device_data.device, swapchain_data.image_format);
-    const graphics_pipeline_data = try createGraphicsPipeline(spec.allocator, device_data.device, render_pass);
+    const graphics_pipeline_data = try createGraphicsPipeline(allocator, device_data.device, render_pass);
 
-    const frame_buffers = try createFrameBuffers(spec.allocator, device_data.device, render_pass, swapchain_data);
+    const frame_buffers = try createFrameBuffers(std.heap.c_allocator, device_data.device, render_pass, swapchain_data);
 
-    const command_pool = try createCommandPool(spec.allocator, physical_device, device_data.device, surface);
-    const command_buffers = try createCommandBuffers(spec.allocator, device_data.device, command_pool);
+    const command_pool = try createCommandPool(std.heap.c_allocator, physical_device, device_data.device, surface);
+    const command_buffers = try createCommandBuffers(std.heap.c_allocator, device_data.device, command_pool);
 
     const sync_objects = try createSyncObjects(device_data.device);
 
     return Renderer{
-        .allocator = spec.allocator,
+        .allocator = allocator,
         .instance = instance,
         .debug_messenger = debug_messenger,
         .physical_device = physical_device,
@@ -164,7 +163,7 @@ fn destroySwapchain(self: Renderer) void {
     c.vkDestroySwapchainKHR(self.device, self.swapchain_data.swapchain, null);
 }
 
-pub fn destroy(self: Renderer) void {
+pub fn destroy(self: *Renderer) void {
     if (ENABLE_VALIDATION_LAYERS) {
         self.destroyDebugMessenger();
     }
@@ -267,7 +266,7 @@ fn createDebugMessenger(
 }
 
 fn destroyDebugMessenger(
-    self: Renderer,
+    self: *Renderer,
 ) void {
     const func = @as(c.PFN_vkDestroyDebugUtilsMessengerEXT, @ptrCast(c.vkGetInstanceProcAddr(
         self.instance,
@@ -931,6 +930,6 @@ fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow) !void {
 
     self.destroySwapchain();
 
-    self.swapchain_data = try createSwapChain(self.allocator, self.physical_device, self.surface, self.device, window);
-    self.frame_buffers = try createFrameBuffers(self.allocator, self.device, self.graphics_pipeline_data.render_pass, self.swapchain_data);
+    self.swapchain_data = try createSwapChain(std.heap.c_allocator, self.physical_device, self.surface, self.device, window);
+    self.frame_buffers = try createFrameBuffers(std.heap.c_allocator, self.device, self.graphics_pipeline_data.render_pass, self.swapchain_data);
 }
