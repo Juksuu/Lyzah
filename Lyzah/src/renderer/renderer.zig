@@ -14,6 +14,38 @@ const DYNAMIC_STATES = [_]c_int{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE
 
 const MAX_FRAMES_IN_FLIGHT = 2;
 
+const Vertex = struct {
+    pos: @Vector(2, f32),
+    color: @Vector(3, f32),
+
+    pub fn getBindingDescription() c.VkVertexInputBindingDescription {
+        const binding_description: c.VkVertexInputBindingDescription = .{
+            .binding = 0,
+            .stride = @sizeOf(Vertex),
+            .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX,
+        };
+        return binding_description;
+    }
+
+    pub fn getAttributeDescriptions() [2]c.VkVertexInputAttributeDescription {
+        const position_attribute: c.VkVertexInputAttributeDescription = .{
+            .binding = 0,
+            .location = 0,
+            .format = c.VK_FORMAT_R32G32_SFLOAT,
+            .offset = @offsetOf(Vertex, "pos"),
+        };
+
+        const color_attribute: c.VkVertexInputAttributeDescription = .{
+            .binding = 0,
+            .location = 1,
+            .format = c.VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = @offsetOf(Vertex, "color"),
+        };
+
+        return [_]c.VkVertexInputAttributeDescription{ position_attribute, color_attribute };
+    }
+};
+
 const QueueFamilyIndices = struct {
     graphics_family: ?u32,
     present_family: ?u32,
@@ -96,6 +128,9 @@ frame_buffers: []c.VkFramebuffer,
 command_pool: c.VkCommandPool,
 command_buffers: []c.VkCommandBuffer,
 sync_objects: SyncObjects,
+vertices: []Vertex,
+vertex_buffer: c.VkBuffer,
+vertex_buffer_memory: c.VkDeviceMemory,
 
 current_frame: u32,
 frame_buffer_resized: bool,
@@ -127,6 +162,14 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     const frame_buffers = try createFrameBuffers(std.heap.c_allocator, device_data.device, render_pass, swapchain_data);
 
     const command_pool = try createCommandPool(std.heap.c_allocator, physical_device, device_data.device, surface);
+
+    var vertices = [_]Vertex{
+        .{ .pos = .{ 0.0, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
+        .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ -0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
+    };
+    const vertex_buffer, const vertex_buffer_memory = try createVertexBuffer(device_data.device, physical_device, &vertices);
+
     const command_buffers = try createCommandBuffers(std.heap.c_allocator, device_data.device, command_pool);
 
     const sync_objects = try createSyncObjects(device_data.device);
@@ -146,6 +189,9 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
         .command_pool = command_pool,
         .command_buffers = command_buffers,
         .sync_objects = sync_objects,
+        .vertices = &vertices,
+        .vertex_buffer = vertex_buffer,
+        .vertex_buffer_memory = vertex_buffer_memory,
         .current_frame = 0,
         .frame_buffer_resized = false,
     };
@@ -169,6 +215,9 @@ pub fn destroy(self: *Renderer) void {
     }
 
     self.destroySwapchain();
+
+    c.vkDestroyBuffer(self.device, self.vertex_buffer, null);
+    c.vkFreeMemory(self.device, self.vertex_buffer_memory, null);
 
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
         c.vkDestroySemaphore(self.device, self.sync_objects.image_available_semaphores[i], null);
@@ -628,12 +677,15 @@ fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass:
 
     const shader_stages = [_]c.VkPipelineShaderStageCreateInfo{ vert_shader_stage_info, frag_shader_stage_info };
 
+    const binding_description = Vertex.getBindingDescription();
+    const attribute_descriptions = Vertex.getAttributeDescriptions();
+
     const vertex_input_info: c.VkPipelineVertexInputStateCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 0,
-        .pVertexBindingDescriptions = null,
-        .vertexAttributeDescriptionCount = 0,
-        .pVertexAttributeDescriptions = null,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &binding_description,
+        .vertexAttributeDescriptionCount = attribute_descriptions.len,
+        .pVertexAttributeDescriptions = &attribute_descriptions,
     };
 
     const input_assembly: c.VkPipelineInputAssemblyStateCreateInfo = .{
@@ -815,7 +867,11 @@ pub fn recordCommandBuffer(self: Renderer, command_buffer: c.VkCommandBuffer, im
 
     c.vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-    c.vkCmdDraw(command_buffer, 3, 1, 0, 0);
+    const vertex_buffers = [_]c.VkBuffer{self.vertex_buffer};
+    const offsets = [_]c.VkDeviceSize{0};
+    c.vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffers, &offsets);
+
+    c.vkCmdDraw(command_buffer, @intCast(self.vertices.len), 1, 0, 0);
 
     c.vkCmdEndRenderPass(command_buffer);
 
@@ -932,4 +988,62 @@ fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow) !void {
 
     self.swapchain_data = try createSwapChain(std.heap.c_allocator, self.physical_device, self.surface, self.device, window);
     self.frame_buffers = try createFrameBuffers(std.heap.c_allocator, self.device, self.graphics_pipeline_data.render_pass, self.swapchain_data);
+}
+
+fn createVertexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, vertices: []Vertex) !struct { c.VkBuffer, c.VkDeviceMemory } {
+    const buffer_info: c.VkBufferCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = @sizeOf(Vertex) * vertices.len,
+        .usage = c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE,
+    };
+
+    var vertex_buffer: c.VkBuffer = undefined;
+    try utils.checkSuccess(c.vkCreateBuffer(device, &buffer_info, null, &vertex_buffer));
+
+    const vertex_buffer_memory = try allocGpuMemForBuffer(device, physical_device, vertex_buffer);
+
+    try utils.checkSuccess(c.vkBindBufferMemory(device, vertex_buffer, vertex_buffer_memory, 0));
+
+    var data: [*]Vertex = undefined;
+    try utils.checkSuccess(c.vkMapMemory(device, vertex_buffer_memory, 0, buffer_info.size, 0, @ptrCast(&data)));
+
+    @memcpy(data, vertices);
+
+    c.vkUnmapMemory(device, vertex_buffer_memory);
+
+    return .{ vertex_buffer, vertex_buffer_memory };
+}
+
+fn allocGpuMemForBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, buffer: c.VkBuffer) !c.VkDeviceMemory {
+    var requirements: c.VkMemoryRequirements = undefined;
+    c.vkGetBufferMemoryRequirements(device, buffer, &requirements);
+
+    const alloc_info: c.VkMemoryAllocateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = requirements.size,
+        .memoryTypeIndex = findMemoryType(
+            physical_device,
+            requirements.memoryTypeBits,
+            c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        ),
+    };
+
+    var buffer_memory: c.VkDeviceMemory = undefined;
+    try utils.checkSuccess(c.vkAllocateMemory(device, &alloc_info, null, &buffer_memory));
+
+    return buffer_memory;
+}
+
+fn findMemoryType(physical_device: c.VkPhysicalDevice, type_filter: u32, properties: c.VkMemoryPropertyFlags) u32 {
+    var mem_properties: c.VkPhysicalDeviceMemoryProperties = undefined;
+    c.vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_properties);
+
+    for (0..mem_properties.memoryTypeCount) |i| {
+        if ((type_filter & std.math.shl(u32, 1, i) > 0) and (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return @intCast(i);
+        }
+    }
+
+    @panic("Failed to find suitable memory type!");
 }
