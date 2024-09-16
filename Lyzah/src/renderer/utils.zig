@@ -125,3 +125,13 @@ pub fn createShaderModule(code: []const u8, device: c.VkDevice) !c.VkShaderModul
 
     return shader_module;
 }
+
+pub fn inSlice(comptime T: type, haystack: []T, needle: T) bool {
+    for (haystack) |elem| {
+        if (needle == elem) {
+            return true;
+        }
+    }
+
+    return false;
+}

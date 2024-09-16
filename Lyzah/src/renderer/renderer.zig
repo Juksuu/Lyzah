@@ -49,16 +49,18 @@ const Vertex = struct {
 const QueueFamilyIndices = struct {
     graphics_family: ?u32,
     present_family: ?u32,
+    transfer_family: ?u32,
 
     fn init() QueueFamilyIndices {
         return QueueFamilyIndices{
             .graphics_family = null,
             .present_family = null,
+            .transfer_family = null,
         };
     }
 
     fn isComplete(self: QueueFamilyIndices) bool {
-        return self.graphics_family != null and self.present_family != null;
+        return self.graphics_family != null and self.present_family != null and self.transfer_family != null;
     }
 };
 
@@ -81,10 +83,16 @@ const SwapchainSupportDetails = struct {
     }
 };
 
+const QueueData = struct {
+    queue: c.VkQueue,
+    index: u32,
+};
+
 const LogicalDeviceData = struct {
     device: c.VkDevice,
-    graphics_queue: c.VkQueue,
-    present_queue: c.VkQueue,
+    graphics_queue: QueueData,
+    present_queue: QueueData,
+    transfer_queue: QueueData,
 };
 
 const SwapchainData = struct {
@@ -118,15 +126,14 @@ allocator: Allocator,
 instance: c.VkInstance,
 debug_messenger: c.VkDebugUtilsMessengerEXT,
 physical_device: c.VkPhysicalDevice,
-device: c.VkDevice,
-graphics_queue: c.VkQueue,
-present_queue: c.VkQueue,
+logical_device_data: LogicalDeviceData,
 surface: c.VkSurfaceKHR,
 swapchain_data: SwapchainData,
 graphics_pipeline_data: GraphicsPipelineData,
 frame_buffers: []c.VkFramebuffer,
 command_pool: c.VkCommandPool,
 command_buffers: []c.VkCommandBuffer,
+transfer_command_pool: c.VkCommandPool,
 sync_objects: SyncObjects,
 vertices: []Vertex,
 vertex_buffer: c.VkBuffer,
@@ -153,41 +160,42 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     const debug_messenger = try setupDebugCallback(instance);
     const surface = try createSurface(instance, glfw_window);
     const physical_device = try pickPhysicalDevice(std.heap.c_allocator, instance, surface);
-    const device_data = try createLogicalDevice(std.heap.c_allocator, physical_device, surface);
-    const swapchain_data = try createSwapChain(std.heap.c_allocator, physical_device, surface, device_data.device, glfw_window);
+    const logical_device_data = try createLogicalDevice(std.heap.c_allocator, physical_device, surface);
 
-    const render_pass = try createRenderPass(device_data.device, swapchain_data.image_format);
-    const graphics_pipeline_data = try createGraphicsPipeline(allocator, device_data.device, render_pass);
+    const logical_device = logical_device_data.device;
 
-    const frame_buffers = try createFrameBuffers(std.heap.c_allocator, device_data.device, render_pass, swapchain_data);
+    const swapchain_data = try createSwapChain(std.heap.c_allocator, physical_device, surface, logical_device, glfw_window);
+    const render_pass = try createRenderPass(logical_device, swapchain_data.image_format);
+    const graphics_pipeline_data = try createGraphicsPipeline(allocator, logical_device, render_pass);
+    const frame_buffers = try createFrameBuffers(std.heap.c_allocator, logical_device, render_pass, swapchain_data);
 
-    const command_pool = try createCommandPool(std.heap.c_allocator, physical_device, device_data.device, surface);
+    const command_pool = try createCommandPool(logical_device, logical_device_data.graphics_queue.index);
+    const command_buffers = try createCommandBuffers(std.heap.c_allocator, logical_device, command_pool);
+
+    const sync_objects = try createSyncObjects(logical_device);
 
     var vertices = [_]Vertex{
         .{ .pos = .{ 0.0, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
         .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
         .{ .pos = .{ -0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
     };
-    const vertex_buffer, const vertex_buffer_memory = try createVertexBuffer(device_data.device, physical_device, &vertices);
+    const vertex_buffer, const vertex_buffer_memory = try createVertexBuffer(logical_device, physical_device, &vertices);
 
-    const command_buffers = try createCommandBuffers(std.heap.c_allocator, device_data.device, command_pool);
-
-    const sync_objects = try createSyncObjects(device_data.device);
+    const transfer_command_pool = try createCommandPool(logical_device, logical_device_data.present_queue.index);
 
     return Renderer{
         .allocator = allocator,
         .instance = instance,
         .debug_messenger = debug_messenger,
         .physical_device = physical_device,
-        .device = device_data.device,
-        .graphics_queue = device_data.graphics_queue,
-        .present_queue = device_data.present_queue,
+        .logical_device_data = logical_device_data,
         .surface = surface,
         .swapchain_data = swapchain_data,
         .graphics_pipeline_data = graphics_pipeline_data,
         .frame_buffers = frame_buffers,
         .command_pool = command_pool,
         .command_buffers = command_buffers,
+        .transfer_command_pool = transfer_command_pool,
         .sync_objects = sync_objects,
         .vertices = &vertices,
         .vertex_buffer = vertex_buffer,
@@ -199,14 +207,14 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
 
 fn destroySwapchain(self: Renderer) void {
     for (self.frame_buffers) |frame_buffer| {
-        c.vkDestroyFramebuffer(self.device, frame_buffer, null);
+        c.vkDestroyFramebuffer(self.logical_device_data.device, frame_buffer, null);
     }
 
     for (self.swapchain_data.image_views) |image_view| {
-        c.vkDestroyImageView(self.device, image_view, null);
+        c.vkDestroyImageView(self.logical_device_data.device, image_view, null);
     }
 
-    c.vkDestroySwapchainKHR(self.device, self.swapchain_data.swapchain, null);
+    c.vkDestroySwapchainKHR(self.logical_device_data.device, self.swapchain_data.swapchain, null);
 }
 
 pub fn destroy(self: *Renderer) void {
@@ -216,22 +224,23 @@ pub fn destroy(self: *Renderer) void {
 
     self.destroySwapchain();
 
-    c.vkDestroyBuffer(self.device, self.vertex_buffer, null);
-    c.vkFreeMemory(self.device, self.vertex_buffer_memory, null);
+    c.vkDestroyBuffer(self.logical_device_data.device, self.vertex_buffer, null);
+    c.vkFreeMemory(self.logical_device_data.device, self.vertex_buffer_memory, null);
 
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
-        c.vkDestroySemaphore(self.device, self.sync_objects.image_available_semaphores[i], null);
-        c.vkDestroySemaphore(self.device, self.sync_objects.render_finished_semaphores[i], null);
-        c.vkDestroyFence(self.device, self.sync_objects.in_flight_fences[i], null);
+        c.vkDestroySemaphore(self.logical_device_data.device, self.sync_objects.image_available_semaphores[i], null);
+        c.vkDestroySemaphore(self.logical_device_data.device, self.sync_objects.render_finished_semaphores[i], null);
+        c.vkDestroyFence(self.logical_device_data.device, self.sync_objects.in_flight_fences[i], null);
     }
 
-    c.vkDestroyCommandPool(self.device, self.command_pool, null);
+    c.vkDestroyCommandPool(self.logical_device_data.device, self.command_pool, null);
+    c.vkDestroyCommandPool(self.logical_device_data.device, self.transfer_command_pool, null);
 
-    c.vkDestroyPipeline(self.device, self.graphics_pipeline_data.pipeline, null);
-    c.vkDestroyPipelineLayout(self.device, self.graphics_pipeline_data.layout, null);
-    c.vkDestroyRenderPass(self.device, self.graphics_pipeline_data.render_pass, null);
+    c.vkDestroyPipeline(self.logical_device_data.device, self.graphics_pipeline_data.pipeline, null);
+    c.vkDestroyPipelineLayout(self.logical_device_data.device, self.graphics_pipeline_data.layout, null);
+    c.vkDestroyRenderPass(self.logical_device_data.device, self.graphics_pipeline_data.render_pass, null);
 
-    c.vkDestroyDevice(self.device, null);
+    c.vkDestroyDevice(self.logical_device_data.device, null);
     c.vkDestroySurfaceKHR(self.instance, self.surface, null);
     c.vkDestroyInstance(self.instance, null);
 }
@@ -373,6 +382,8 @@ fn findQueueFamilies(allocator: Allocator, physical_device: c.VkPhysicalDevice, 
     for (0.., queue_families) |i, family| {
         if ((family.queueFlags & c.VK_QUEUE_GRAPHICS_BIT) != 0) {
             indices.graphics_family = @truncate(i);
+        } else if ((family.queueFlags & c.VK_QUEUE_TRANSFER_BIT) != 0) {
+            indices.transfer_family = @truncate(i);
         }
 
         var present_support: c.VkBool32 = c.VK_FALSE;
@@ -394,16 +405,20 @@ fn createLogicalDevice(allocator: Allocator, physical_device: c.VkPhysicalDevice
     const indices = try findQueueFamilies(allocator, physical_device, surface);
 
     var queue_create_infos = std.ArrayList(c.VkDeviceQueueCreateInfo).init(allocator);
-    queue_create_infos.deinit();
+    defer queue_create_infos.deinit();
 
-    const all_queue_families = [_]u32{ indices.graphics_family.?, indices.present_family.? };
-    const unique_queue_families = if (indices.graphics_family.? == indices.present_family.?)
-        all_queue_families[0..1]
-    else
-        all_queue_families[0..2];
+    const all_queue_families = [_]u32{ indices.graphics_family.?, indices.present_family.?, indices.transfer_family.? };
+    var unique_queue_families = std.ArrayList(u32).init(allocator);
+    defer unique_queue_families.deinit();
+
+    for (all_queue_families) |queue_family| {
+        if (!utils.inSlice(u32, unique_queue_families.items, queue_family)) {
+            try unique_queue_families.append(queue_family);
+        }
+    }
 
     const queue_priority: f32 = 1.0;
-    for (unique_queue_families) |queue_family| {
+    for (unique_queue_families.items) |queue_family| {
         const queue_create_info: c.VkDeviceQueueCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
             .queueFamilyIndex = queue_family,
@@ -441,7 +456,15 @@ fn createLogicalDevice(allocator: Allocator, physical_device: c.VkPhysicalDevice
     var present_queue: c.VkQueue = null;
     c.vkGetDeviceQueue(device, indices.present_family.?, 0, &present_queue);
 
-    return .{ .device = device, .graphics_queue = graphics_queue, .present_queue = present_queue };
+    var transfer_queue: c.VkQueue = null;
+    c.vkGetDeviceQueue(device, indices.transfer_family.?, 0, &transfer_queue);
+
+    return .{
+        .device = device,
+        .graphics_queue = .{ .queue = graphics_queue, .index = indices.graphics_family.? },
+        .present_queue = .{ .queue = present_queue, .index = indices.present_family.? },
+        .transfer_queue = .{ .queue = transfer_queue, .index = indices.transfer_family.? },
+    };
 }
 
 fn createSurface(instance: c.VkInstance, window: *c.GLFWwindow) !c.VkSurfaceKHR {
@@ -544,17 +567,19 @@ fn createSwapChain(allocator: Allocator, physical_device: c.VkPhysicalDevice, su
     };
 
     const indices = try findQueueFamilies(allocator, physical_device, surface);
-    const queue_family_indices = [_]u32{ indices.graphics_family.?, indices.present_family.? };
+    const all_queue_families = [_]u32{ indices.graphics_family.?, indices.present_family.?, indices.transfer_family.? };
+    var unique_queue_families = std.ArrayList(u32).init(allocator);
+    defer unique_queue_families.deinit();
 
-    if (indices.graphics_family != indices.present_family) {
-        create_info.imageSharingMode = c.VK_SHARING_MODE_CONCURRENT;
-        create_info.queueFamilyIndexCount = 2;
-        create_info.pQueueFamilyIndices = &queue_family_indices;
-    } else {
-        create_info.imageSharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
-        create_info.queueFamilyIndexCount = 0;
-        create_info.pQueueFamilyIndices = null;
+    for (all_queue_families) |queue_family| {
+        if (!utils.inSlice(u32, unique_queue_families.items, queue_family)) {
+            try unique_queue_families.append(queue_family);
+        }
     }
+
+    create_info.imageSharingMode = c.VK_SHARING_MODE_CONCURRENT;
+    create_info.queueFamilyIndexCount = @intCast(unique_queue_families.items.len);
+    create_info.pQueueFamilyIndices = unique_queue_families.items.ptr;
 
     var swapchain: c.VkSwapchainKHR = undefined;
     try utils.checkSuccess(c.vkCreateSwapchainKHR(device, &create_info, null, &swapchain));
@@ -793,13 +818,11 @@ fn createFrameBuffers(allocator: Allocator, device: c.VkDevice, render_pass: c.V
     return swapchain_frame_buffers;
 }
 
-fn createCommandPool(allocator: Allocator, physical_device: c.VkPhysicalDevice, device: c.VkDevice, surface: c.VkSurfaceKHR) !c.VkCommandPool {
-    const queue_family_indices = try findQueueFamilies(allocator, physical_device, surface);
-
+fn createCommandPool(device: c.VkDevice, queue_index: u32) !c.VkCommandPool {
     const pool_info: c.VkCommandPoolCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = c.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = queue_family_indices.graphics_family.?,
+        .queueFamilyIndex = queue_index,
     };
 
     var command_pool: c.VkCommandPool = undefined;
@@ -910,10 +933,10 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
 
     const command_buffer = self.command_buffers[self.current_frame];
 
-    try utils.checkSuccess(c.vkWaitForFences(self.device, 1, &in_flight_fence, c.VK_TRUE, maxInt(u64)));
+    try utils.checkSuccess(c.vkWaitForFences(self.logical_device_data.device, 1, &in_flight_fence, c.VK_TRUE, maxInt(u64)));
 
     var image_index: u32 = undefined;
-    const aquire_result = c.vkAcquireNextImageKHR(self.device, self.swapchain_data.swapchain, maxInt(u64), image_available_semaphore, null, &image_index);
+    const aquire_result = c.vkAcquireNextImageKHR(self.logical_device_data.device, self.swapchain_data.swapchain, maxInt(u64), image_available_semaphore, null, &image_index);
 
     if (aquire_result == c.VK_ERROR_OUT_OF_DATE_KHR) {
         try self.recreateSwapchain(window);
@@ -922,7 +945,7 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
         return error.VulkanFailedToAquireSwapchainImage;
     }
 
-    try utils.checkSuccess(c.vkResetFences(self.device, 1, &in_flight_fence));
+    try utils.checkSuccess(c.vkResetFences(self.logical_device_data.device, 1, &in_flight_fence));
 
     try utils.checkSuccess(c.vkResetCommandBuffer(command_buffer, 0));
 
@@ -944,7 +967,7 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
         .pSignalSemaphores = &signal_semaphores,
     };
 
-    try utils.checkSuccess(c.vkQueueSubmit(self.graphics_queue.?, 1, &submit_info, in_flight_fence));
+    try utils.checkSuccess(c.vkQueueSubmit(self.logical_device_data.graphics_queue.queue.?, 1, &submit_info, in_flight_fence));
 
     const swapchains = [_]c.VkSwapchainKHR{self.swapchain_data.swapchain};
     const presentInfo: c.VkPresentInfoKHR = .{
@@ -956,7 +979,7 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
         .pImageIndices = &image_index,
     };
 
-    const present_result = c.vkQueuePresentKHR(self.present_queue, &presentInfo);
+    const present_result = c.vkQueuePresentKHR(self.logical_device_data.present_queue.queue, &presentInfo);
 
     if (present_result == c.VK_ERROR_OUT_OF_DATE_KHR or present_result == c.VK_SUBOPTIMAL_KHR or self.frame_buffer_resized) {
         self.frame_buffer_resized = false;
@@ -969,7 +992,7 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
 }
 
 pub fn waitForDevice(self: Renderer) !void {
-    try utils.checkSuccess(c.vkDeviceWaitIdle(self.device));
+    try utils.checkSuccess(c.vkDeviceWaitIdle(self.logical_device_data.device));
 }
 
 fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow) !void {
@@ -986,8 +1009,8 @@ fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow) !void {
 
     self.destroySwapchain();
 
-    self.swapchain_data = try createSwapChain(std.heap.c_allocator, self.physical_device, self.surface, self.device, window);
-    self.frame_buffers = try createFrameBuffers(std.heap.c_allocator, self.device, self.graphics_pipeline_data.render_pass, self.swapchain_data);
+    self.swapchain_data = try createSwapChain(std.heap.c_allocator, self.physical_device, self.surface, self.logical_device_data.device, window);
+    self.frame_buffers = try createFrameBuffers(std.heap.c_allocator, self.logical_device_data.device, self.graphics_pipeline_data.render_pass, self.swapchain_data);
 }
 
 fn createVertexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, vertices: []Vertex) !struct { c.VkBuffer, c.VkDeviceMemory } {
