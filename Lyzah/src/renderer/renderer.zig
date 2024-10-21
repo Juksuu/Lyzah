@@ -143,6 +143,9 @@ sync_objects: SyncObjects,
 vertices: []Vertex,
 vertex_buffer: c.VkBuffer,
 vertex_buffer_memory: c.VkDeviceMemory,
+indices: []u16,
+index_buffer: c.VkBuffer,
+index_buffer_memory: c.VkDeviceMemory,
 
 current_frame: u32,
 frame_buffer_resized: bool,
@@ -182,13 +185,19 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     const transfer_command_pool = try createCommandPool(logical_device, logical_device_data.transfer_queue.index, c.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
     var vertices = [_]Vertex{
-        .{ .pos = .{ 0.0, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
-        .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ -0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
+        .{ .pos = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
+        .{ .pos = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
+        .{ .pos = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 } },
     };
     const vertex_buffer_data = try createVertexBuffer(logical_device, physical_device, &vertices, transfer_command_pool, logical_device_data.transfer_queue.queue);
 
+    var indices = [_]u16{ 0, 1, 2, 2, 3, 0 };
+    const index_buffer_data = try createIndexBuffer(logical_device, physical_device, &indices, transfer_command_pool, logical_device_data.transfer_queue.queue);
+
     return Renderer{
+        .current_frame = 0,
+        .frame_buffer_resized = false,
         .allocator = allocator,
         .instance = instance,
         .debug_messenger = debug_messenger,
@@ -205,8 +214,9 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
         .vertices = &vertices,
         .vertex_buffer = vertex_buffer_data.buffer,
         .vertex_buffer_memory = vertex_buffer_data.memory,
-        .current_frame = 0,
-        .frame_buffer_resized = false,
+        .indices = &indices,
+        .index_buffer = index_buffer_data.buffer,
+        .index_buffer_memory = index_buffer_data.memory,
     };
 }
 
@@ -231,6 +241,9 @@ pub fn destroy(self: *Renderer) void {
 
     c.vkDestroyBuffer(self.logical_device_data.device, self.vertex_buffer, null);
     c.vkFreeMemory(self.logical_device_data.device, self.vertex_buffer_memory, null);
+
+    c.vkDestroyBuffer(self.logical_device_data.device, self.index_buffer, null);
+    c.vkFreeMemory(self.logical_device_data.device, self.index_buffer_memory, null);
 
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
         c.vkDestroySemaphore(self.logical_device_data.device, self.sync_objects.image_available_semaphores[i], null);
@@ -899,7 +912,9 @@ pub fn recordCommandBuffer(self: Renderer, command_buffer: c.VkCommandBuffer, im
     const offsets = [_]c.VkDeviceSize{0};
     c.vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffers, &offsets);
 
-    c.vkCmdDraw(command_buffer, @intCast(self.vertices.len), 1, 0, 0);
+    c.vkCmdBindIndexBuffer(command_buffer, self.index_buffer, 0, c.VK_INDEX_TYPE_UINT16);
+
+    c.vkCmdDrawIndexed(command_buffer, @intCast(self.indices.len), 1, 0, 0, 0);
 
     c.vkCmdEndRenderPass(command_buffer);
 
@@ -1124,4 +1139,25 @@ fn copyBuffer(device: c.VkDevice, src_buffer: c.VkBuffer, dst_buffer: c.VkBuffer
     try utils.checkSuccess(c.vkQueueWaitIdle(transfer_queue));
 
     c.vkFreeCommandBuffers(device, command_pool, 1, &command_buffer);
+}
+
+fn createIndexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, indices: []u16, transfer_command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !BufferData {
+    const buffer_size = @sizeOf(u16) * indices.len;
+    const staging_buffer_data = try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    var data: [*]u16 = undefined;
+    try utils.checkSuccess(c.vkMapMemory(device, staging_buffer_data.memory, 0, buffer_size, 0, @ptrCast(&data)));
+
+    @memcpy(data, indices);
+
+    c.vkUnmapMemory(device, staging_buffer_data.memory);
+
+    const index_buffer_data = try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_DST_BIT | c.VK_BUFFER_USAGE_INDEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    try copyBuffer(device, staging_buffer_data.buffer, index_buffer_data.buffer, buffer_size, transfer_command_pool, transfer_queue);
+
+    c.vkDestroyBuffer(device, staging_buffer_data.buffer, null);
+    c.vkFreeMemory(device, staging_buffer_data.memory, null);
+
+    return index_buffer_data;
 }
