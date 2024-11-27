@@ -1,0 +1,12 @@
+// zig fmt: off
+.{
+    .name = "Lyzah",
+    .version = "0.0.1",
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+    .dependencies = .{
+        .zmath = .{
+            .url = "https://github.com/zig-gamedev/zmath/archive/c6aa077003b53aaa3929541201b83bc394ed7ddb.tar.gz",
+            .hash = "1220081d55b58b968d953db1afc2fb01b2f5733929144e69522461ce25fa6450d84e",
+        },
+    },
+}

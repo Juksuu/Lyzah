@@ -1,8 +1,11 @@
 const std = @import("std");
+const zmath = @import("zmath");
+
 const c = @import("../c.zig");
 
 const utils = @import("utils.zig");
 
+const time = std.time;
 const maxInt = std.math.maxInt;
 const Allocator = std.mem.Allocator;
 
@@ -13,6 +16,12 @@ const DEVICE_EXTENSIONS = [_][*:0]const u8{c.VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 const DYNAMIC_STATES = [_]c_int{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
 
 const MAX_FRAMES_IN_FLIGHT = 2;
+
+const UniformBufferObject = extern struct {
+    model: zmath.Mat align(16),
+    view: zmath.Mat align(16),
+    proj: zmath.Mat align(16),
+};
 
 const Vertex = struct {
     pos: @Vector(2, f32),
@@ -120,6 +129,11 @@ const BufferData = struct {
     memory: c.VkDeviceMemory,
 };
 
+const UniformBufferData = struct {
+    buffers: [MAX_FRAMES_IN_FLIGHT]c.VkBuffer,
+    buffers_memory: [MAX_FRAMES_IN_FLIGHT]c.VkDeviceMemory,
+};
+
 pub const RendererSpec = struct {
     name: [*c]const u8,
     required_extensions: [][*:0]const u8,
@@ -134,6 +148,7 @@ physical_device: c.VkPhysicalDevice,
 logical_device_data: LogicalDeviceData,
 surface: c.VkSurfaceKHR,
 swapchain_data: SwapchainData,
+descriptor_set_layout: c.VkDescriptorSetLayout,
 graphics_pipeline_data: GraphicsPipelineData,
 frame_buffers: []c.VkFramebuffer,
 command_pool: c.VkCommandPool,
@@ -146,8 +161,13 @@ vertex_buffer_memory: c.VkDeviceMemory,
 indices: []u16,
 index_buffer: c.VkBuffer,
 index_buffer_memory: c.VkDeviceMemory,
+uniform_buffers: UniformBufferData,
+descriptor_pool: c.VkDescriptorPool,
+descriptor_sets: [MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSet,
 
 current_frame: u32,
+last_frame_time: time.Instant,
+start_time: time.Instant,
 frame_buffer_resized: bool,
 
 pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow) !Renderer {
@@ -174,7 +194,8 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
 
     const swapchain_data = try createSwapChain(std.heap.c_allocator, physical_device, surface, logical_device, glfw_window);
     const render_pass = try createRenderPass(logical_device, swapchain_data.image_format);
-    const graphics_pipeline_data = try createGraphicsPipeline(allocator, logical_device, render_pass);
+    const descriptor_set_layout = try createDescriptorSetLayout(logical_device);
+    const graphics_pipeline_data = try createGraphicsPipeline(allocator, logical_device, render_pass, descriptor_set_layout);
     const frame_buffers = try createFrameBuffers(std.heap.c_allocator, logical_device, render_pass, swapchain_data);
 
     const command_pool = try createCommandPool(logical_device, logical_device_data.graphics_queue.index, c.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
@@ -195,8 +216,15 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     var indices = [_]u16{ 0, 1, 2, 2, 3, 0 };
     const index_buffer_data = try createIndexBuffer(logical_device, physical_device, &indices, transfer_command_pool, logical_device_data.transfer_queue.queue);
 
+    const uniform_buffer_data = try createUniformBuffers(logical_device, physical_device);
+
+    const descriptor_pool = try createDescriptorPool(logical_device);
+    const descriptor_sets = try createDescriptorSets(logical_device, descriptor_set_layout, descriptor_pool, uniform_buffer_data);
+
     return Renderer{
         .current_frame = 0,
+        .last_frame_time = try time.Instant.now(),
+        .start_time = try time.Instant.now(),
         .frame_buffer_resized = false,
         .allocator = allocator,
         .instance = instance,
@@ -205,6 +233,7 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
         .logical_device_data = logical_device_data,
         .surface = surface,
         .swapchain_data = swapchain_data,
+        .descriptor_set_layout = descriptor_set_layout,
         .graphics_pipeline_data = graphics_pipeline_data,
         .frame_buffers = frame_buffers,
         .command_pool = command_pool,
@@ -217,6 +246,9 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
         .indices = &indices,
         .index_buffer = index_buffer_data.buffer,
         .index_buffer_memory = index_buffer_data.memory,
+        .uniform_buffers = uniform_buffer_data,
+        .descriptor_pool = descriptor_pool,
+        .descriptor_sets = descriptor_sets,
     };
 }
 
@@ -238,6 +270,15 @@ pub fn destroy(self: *Renderer) void {
     }
 
     self.destroySwapchain();
+
+    for (0..MAX_FRAMES_IN_FLIGHT) |i| {
+        c.vkDestroyBuffer(self.logical_device_data.device, self.uniform_buffers.buffers[i], null);
+        c.vkFreeMemory(self.logical_device_data.device, self.uniform_buffers.buffers_memory[i], null);
+    }
+
+    c.vkDestroyDescriptorPool(self.logical_device_data.device, self.descriptor_pool, null);
+
+    c.vkDestroyDescriptorSetLayout(self.logical_device_data.device, self.descriptor_set_layout, null);
 
     c.vkDestroyBuffer(self.logical_device_data.device, self.vertex_buffer, null);
     c.vkFreeMemory(self.logical_device_data.device, self.vertex_buffer_memory, null);
@@ -694,7 +735,7 @@ fn createRenderPass(device: c.VkDevice, swapchain_image_format: c.VkFormat) !c.V
     return render_pass;
 }
 
-fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass: c.VkRenderPass) !GraphicsPipelineData {
+fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass: c.VkRenderPass, descriptor_set_layout: c.VkDescriptorSetLayout) !GraphicsPipelineData {
     const vert = try utils.readFileToBuffer(allocator, "shaders/vert.spv");
     const frag = try utils.readFileToBuffer(allocator, "shaders/frag.spv");
 
@@ -750,7 +791,7 @@ fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass:
         .polygonMode = c.VK_POLYGON_MODE_FILL,
         .lineWidth = 1.0,
         .cullMode = c.VK_CULL_MODE_BACK_BIT,
-        .frontFace = c.VK_FRONT_FACE_CLOCKWISE,
+        .frontFace = c.VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .depthBiasEnable = c.VK_FALSE,
     };
 
@@ -774,6 +815,8 @@ fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass:
 
     const pipeline_layout_info: c.VkPipelineLayoutCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &descriptor_set_layout,
     };
 
     var pipeline_layout: c.VkPipelineLayout = undefined;
@@ -913,9 +956,8 @@ pub fn recordCommandBuffer(self: Renderer, command_buffer: c.VkCommandBuffer, im
     c.vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffers, &offsets);
 
     c.vkCmdBindIndexBuffer(command_buffer, self.index_buffer, 0, c.VK_INDEX_TYPE_UINT16);
-
+    c.vkCmdBindDescriptorSets(command_buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphics_pipeline_data.layout, 0, 1, &self.descriptor_sets[self.current_frame], 0, null);
     c.vkCmdDrawIndexed(command_buffer, @intCast(self.indices.len), 1, 0, 0, 0);
-
     c.vkCmdEndRenderPass(command_buffer);
 
     try utils.checkSuccess(c.vkEndCommandBuffer(command_buffer));
@@ -947,6 +989,12 @@ fn createSyncObjects(device: c.VkDevice) !SyncObjects {
 }
 
 pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
+    const current_frame_time = try time.Instant.now();
+    // const delta: f32 = @as(f32, @floatFromInt(current_frame_time.since(self.last_frame_time))) / 1_000_000_000;
+    self.last_frame_time = current_frame_time;
+
+    // std.debug.print("delta: {d}\n", .{delta});
+
     const in_flight_fence = self.sync_objects.in_flight_fences[self.current_frame];
     const image_available_semaphore = self.sync_objects.image_available_semaphores[self.current_frame];
     const render_finished_semaphore = self.sync_objects.render_finished_semaphores[self.current_frame];
@@ -964,6 +1012,8 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
     } else if (aquire_result != c.VK_SUCCESS and aquire_result != c.VK_SUBOPTIMAL_KHR) {
         return error.VulkanFailedToAquireSwapchainImage;
     }
+
+    try self.updateUniformBuffer();
 
     try utils.checkSuccess(c.vkResetFences(self.logical_device_data.device, 1, &in_flight_fence));
 
@@ -1035,43 +1085,28 @@ fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow) !void {
 
 fn createVertexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, vertices: []Vertex, transfer_command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !BufferData {
     const buffer_size = @sizeOf(Vertex) * vertices.len;
-    const staging_buffer_data = try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    var staging_buffer: c.VkBuffer = undefined;
+    var staging_buffer_memory: c.VkDeviceMemory = undefined;
+    try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &staging_buffer, &staging_buffer_memory);
 
     var data: [*]Vertex = undefined;
-    try utils.checkSuccess(c.vkMapMemory(device, staging_buffer_data.memory, 0, buffer_size, 0, @ptrCast(&data)));
+    try utils.checkSuccess(c.vkMapMemory(device, staging_buffer_memory, 0, buffer_size, 0, @ptrCast(&data)));
 
     @memcpy(data, vertices);
 
-    c.vkUnmapMemory(device, staging_buffer_data.memory);
+    c.vkUnmapMemory(device, staging_buffer_memory);
 
-    const vertex_buffer_data = try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_DST_BIT | c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    var vertex_buffer: c.VkBuffer = undefined;
+    var vertex_buffer_memory: c.VkDeviceMemory = undefined;
+    try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_DST_BIT | c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &vertex_buffer, &vertex_buffer_memory);
 
-    try copyBuffer(device, staging_buffer_data.buffer, vertex_buffer_data.buffer, buffer_size, transfer_command_pool, transfer_queue);
+    try copyBuffer(device, staging_buffer, vertex_buffer, buffer_size, transfer_command_pool, transfer_queue);
 
-    c.vkDestroyBuffer(device, staging_buffer_data.buffer, null);
-    c.vkFreeMemory(device, staging_buffer_data.memory, null);
+    c.vkDestroyBuffer(device, staging_buffer, null);
+    c.vkFreeMemory(device, staging_buffer_memory, null);
 
-    return vertex_buffer_data;
-}
-
-fn allocGpuMemForBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, buffer: c.VkBuffer, properties: c.VkMemoryPropertyFlags) !c.VkDeviceMemory {
-    var requirements: c.VkMemoryRequirements = undefined;
-    c.vkGetBufferMemoryRequirements(device, buffer, &requirements);
-
-    const alloc_info: c.VkMemoryAllocateInfo = .{
-        .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = requirements.size,
-        .memoryTypeIndex = findMemoryType(
-            physical_device,
-            requirements.memoryTypeBits,
-            properties,
-        ),
-    };
-
-    var buffer_memory: c.VkDeviceMemory = undefined;
-    try utils.checkSuccess(c.vkAllocateMemory(device, &alloc_info, null, &buffer_memory));
-
-    return buffer_memory;
+    return .{ .buffer = vertex_buffer, .memory = vertex_buffer_memory };
 }
 
 fn findMemoryType(physical_device: c.VkPhysicalDevice, type_filter: u32, properties: c.VkMemoryPropertyFlags) u32 {
@@ -1087,7 +1122,7 @@ fn findMemoryType(physical_device: c.VkPhysicalDevice, type_filter: u32, propert
     @panic("Failed to find suitable memory type!");
 }
 
-fn createBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, size: c.VkDeviceSize, usage: c.VkBufferUsageFlags, properties: c.VkMemoryPropertyFlags) !BufferData {
+fn createBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, size: c.VkDeviceSize, usage: c.VkBufferUsageFlags, properties: c.VkMemoryPropertyFlags, buffer: *c.VkBuffer, buffer_memory: *c.VkDeviceMemory) !void {
     const buffer_info: c.VkBufferCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = size,
@@ -1095,13 +1130,24 @@ fn createBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, size: c
         .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE,
     };
 
-    var buffer: c.VkBuffer = undefined;
-    try utils.checkSuccess(c.vkCreateBuffer(device, &buffer_info, null, &buffer));
+    try utils.checkSuccess(c.vkCreateBuffer(device, &buffer_info, null, buffer));
 
-    const buffer_memory = try allocGpuMemForBuffer(device, physical_device, buffer, properties);
-    try utils.checkSuccess(c.vkBindBufferMemory(device, buffer, buffer_memory, 0));
+    var requirements: c.VkMemoryRequirements = undefined;
+    c.vkGetBufferMemoryRequirements(device, buffer.*, &requirements);
 
-    return .{ .buffer = buffer, .memory = buffer_memory };
+    const alloc_info: c.VkMemoryAllocateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = requirements.size,
+        .memoryTypeIndex = findMemoryType(
+            physical_device,
+            requirements.memoryTypeBits,
+            properties,
+        ),
+    };
+
+    try utils.checkSuccess(c.vkAllocateMemory(device, &alloc_info, null, buffer_memory));
+
+    try utils.checkSuccess(c.vkBindBufferMemory(device, buffer.*, buffer_memory.*, 0));
 }
 
 fn copyBuffer(device: c.VkDevice, src_buffer: c.VkBuffer, dst_buffer: c.VkBuffer, size: c.VkDeviceSize, command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !void {
@@ -1143,21 +1189,147 @@ fn copyBuffer(device: c.VkDevice, src_buffer: c.VkBuffer, dst_buffer: c.VkBuffer
 
 fn createIndexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, indices: []u16, transfer_command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !BufferData {
     const buffer_size = @sizeOf(u16) * indices.len;
-    const staging_buffer_data = try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    var staging_buffer: c.VkBuffer = undefined;
+    var staging_buffer_memory: c.VkDeviceMemory = undefined;
+    try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &staging_buffer, &staging_buffer_memory);
 
     var data: [*]u16 = undefined;
-    try utils.checkSuccess(c.vkMapMemory(device, staging_buffer_data.memory, 0, buffer_size, 0, @ptrCast(&data)));
+    try utils.checkSuccess(c.vkMapMemory(device, staging_buffer_memory, 0, buffer_size, 0, @ptrCast(&data)));
 
     @memcpy(data, indices);
 
-    c.vkUnmapMemory(device, staging_buffer_data.memory);
+    c.vkUnmapMemory(device, staging_buffer_memory);
 
-    const index_buffer_data = try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_DST_BIT | c.VK_BUFFER_USAGE_INDEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    var index_buffer: c.VkBuffer = undefined;
+    var index_buffer_memory: c.VkDeviceMemory = undefined;
+    try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_DST_BIT | c.VK_BUFFER_USAGE_INDEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &index_buffer, &index_buffer_memory);
 
-    try copyBuffer(device, staging_buffer_data.buffer, index_buffer_data.buffer, buffer_size, transfer_command_pool, transfer_queue);
+    try copyBuffer(device, staging_buffer, index_buffer, buffer_size, transfer_command_pool, transfer_queue);
 
-    c.vkDestroyBuffer(device, staging_buffer_data.buffer, null);
-    c.vkFreeMemory(device, staging_buffer_data.memory, null);
+    c.vkDestroyBuffer(device, staging_buffer, null);
+    c.vkFreeMemory(device, staging_buffer_memory, null);
 
-    return index_buffer_data;
+    return .{ .buffer = index_buffer, .memory = index_buffer_memory };
+}
+
+fn createDescriptorSetLayout(device: c.VkDevice) !c.VkDescriptorSetLayout {
+    const ubo_layout_binding: c.VkDescriptorSetLayoutBinding = .{
+        .binding = 0,
+        .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT,
+    };
+
+    const layout_info: c.VkDescriptorSetLayoutCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &ubo_layout_binding,
+    };
+
+    var descriptor_set_layout: c.VkDescriptorSetLayout = undefined;
+    try utils.checkSuccess(c.vkCreateDescriptorSetLayout(device, &layout_info, null, &descriptor_set_layout));
+
+    return descriptor_set_layout;
+}
+
+fn createUniformBuffers(device: c.VkDevice, physical_device: c.VkPhysicalDevice) !UniformBufferData {
+    const buffer_size: c.VkDeviceSize = @sizeOf(UniformBufferObject);
+
+    var uniform_buffer_data: UniformBufferData = .{
+        .buffers = undefined,
+        .buffers_memory = undefined,
+    };
+
+    for (0..MAX_FRAMES_IN_FLIGHT) |i| {
+        try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &uniform_buffer_data.buffers[i], &uniform_buffer_data.buffers_memory[i]);
+
+        // try utils.checkSuccess(c.vkMapMemory(device, uniform_buffer_data.buffers_memory[i], 0, buffer_size, 0, @ptrCast(&uniform_buffer_data.buffers_mapped[i])));
+    }
+
+    return uniform_buffer_data;
+}
+
+fn updateUniformBuffer(self: *Renderer) !void {
+    // std.debug.print("width: {d}, height: {d}, aspect: {d}\n", .{ self.swapchain_data.extent.width, self.swapchain_data.extent.height, @as(f32, @floatFromInt(self.swapchain_data.extent.width)) / @as(f32, @floatFromInt(self.swapchain_data.extent.height)) });
+
+    const current_time = try time.Instant.now();
+    const time_since_start: f32 = @as(f32, @floatFromInt(current_time.since(self.start_time))) / 1_000_000_000;
+    const angle = time_since_start * std.math.degreesToRadians(90.0);
+
+    var ubo: UniformBufferObject = .{
+        .model = zmath.rotationZ(angle),
+        .view = zmath.lookAtRh(zmath.f32x4(2.0, 2.0, 2.0, 1.0), zmath.f32x4(0.0, 0.0, 0.0, 1.0), zmath.f32x4(0.0, 0.0, 1.0, 0.0)),
+        .proj = zmath.perspectiveFovRh(
+            std.math.degreesToRadians(45.0),
+            @as(f32, @floatFromInt(self.swapchain_data.extent.width)) / @as(f32, @floatFromInt(self.swapchain_data.extent.height)),
+            0.1,
+            100.0,
+        ),
+    };
+
+    ubo.proj[1][1] *= -1;
+
+    // std.debug.print("test: {any}\n", .{ubo.proj});
+
+    var data: [*]u8 = undefined;
+    try utils.checkSuccess(c.vkMapMemory(self.logical_device_data.device, self.uniform_buffers.buffers_memory[self.current_frame], 0, @sizeOf(UniformBufferObject), 0, @ptrCast(&data)));
+
+    @memcpy(data, std.mem.asBytes(&ubo));
+
+    c.vkUnmapMemory(self.logical_device_data.device, self.uniform_buffers.buffers_memory[self.current_frame]);
+}
+
+fn createDescriptorPool(device: c.VkDevice) !c.VkDescriptorPool {
+    const pool_size: c.VkDescriptorPoolSize = .{
+        .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = MAX_FRAMES_IN_FLIGHT,
+    };
+
+    const pool_info: c.VkDescriptorPoolCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = MAX_FRAMES_IN_FLIGHT,
+    };
+
+    var descriptor_pool: c.VkDescriptorPool = undefined;
+    try utils.checkSuccess(c.vkCreateDescriptorPool(device, &pool_info, null, &descriptor_pool));
+
+    return descriptor_pool;
+}
+
+fn createDescriptorSets(device: c.VkDevice, descriptor_set_layout: c.VkDescriptorSetLayout, descriptor_pool: c.VkDescriptorPool, uniform_buffer_data: UniformBufferData) ![MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSet {
+    var layouts: [MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSetLayout = .{descriptor_set_layout} ** MAX_FRAMES_IN_FLIGHT;
+
+    const alloc_info: c.VkDescriptorSetAllocateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = descriptor_pool,
+        .descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+        .pSetLayouts = &layouts,
+    };
+
+    var descriptor_sets: [MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSet = undefined;
+    try utils.checkSuccess(c.vkAllocateDescriptorSets(device, &alloc_info, &descriptor_sets));
+
+    for (0..MAX_FRAMES_IN_FLIGHT) |i| {
+        const buffer_info: c.VkDescriptorBufferInfo = .{
+            .buffer = uniform_buffer_data.buffers[i],
+            .offset = 0,
+            .range = @sizeOf(UniformBufferObject),
+        };
+
+        const descriptor_write: c.VkWriteDescriptorSet = .{
+            .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptor_sets[i],
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = 1,
+            .pBufferInfo = &buffer_info,
+        };
+
+        c.vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, null);
+    }
+
+    return descriptor_sets;
 }
