@@ -10,4 +10,8 @@ pub fn build(b: *std.Build) void {
 
     const zmath = b.dependency("zmath", .{});
     lyzah.addImport("zmath", zmath.module("root"));
+
+    const zstbi = b.dependency("zstbi", .{});
+    lyzah.addImport("zstbi", zstbi.module("root"));
+    lyzah.linkLibrary(zstbi.artifact("zstbi"));
 }

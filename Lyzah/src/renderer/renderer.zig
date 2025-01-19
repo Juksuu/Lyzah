@@ -1,5 +1,6 @@
 const std = @import("std");
 const zmath = @import("zmath");
+const zstbi = @import("zstbi");
 
 const c = @import("../c.zig");
 
@@ -134,6 +135,11 @@ const UniformBufferData = struct {
     buffers_memory: [MAX_FRAMES_IN_FLIGHT]c.VkDeviceMemory,
 };
 
+const TextureImageData = struct {
+    image: c.VkImage,
+    image_memory: c.VkDeviceMemory,
+};
+
 pub const RendererSpec = struct {
     name: [*c]const u8,
     required_extensions: [][*:0]const u8,
@@ -164,6 +170,7 @@ index_buffer_memory: c.VkDeviceMemory,
 uniform_buffers: UniformBufferData,
 descriptor_pool: c.VkDescriptorPool,
 descriptor_sets: [MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSet,
+image_data: TextureImageData,
 
 current_frame: u32,
 last_frame_time: time.Instant,
@@ -174,6 +181,8 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     if (ENABLE_VALIDATION_LAYERS and !(try utils.checkValidationLayerSupport(allocator, @constCast(&VALIDATION_LAYERS)))) {
         return error.VulkanValidationLayersRequestedButNotAvailable;
     }
+
+    zstbi.init(std.heap.c_allocator);
 
     const app_info = c.VkApplicationInfo{
         .sType = c.VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -221,6 +230,8 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     const descriptor_pool = try createDescriptorPool(logical_device);
     const descriptor_sets = try createDescriptorSets(logical_device, descriptor_set_layout, descriptor_pool, uniform_buffer_data);
 
+    const image_data = try createTextureImage("textures/texture.jpg", logical_device, physical_device, command_pool, logical_device_data.graphics_queue.queue);
+
     return Renderer{
         .current_frame = 0,
         .last_frame_time = try time.Instant.now(),
@@ -249,6 +260,7 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
         .uniform_buffers = uniform_buffer_data,
         .descriptor_pool = descriptor_pool,
         .descriptor_sets = descriptor_sets,
+        .image_data = image_data,
     };
 }
 
@@ -270,6 +282,9 @@ pub fn destroy(self: *Renderer) void {
     }
 
     self.destroySwapchain();
+
+    c.vkDestroyImage(self.logical_device_data.device, self.image_data.image, null);
+    c.vkFreeMemory(self.logical_device_data.device, self.image_data.image_memory, null);
 
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
         c.vkDestroyBuffer(self.logical_device_data.device, self.uniform_buffers.buffers[i], null);
@@ -302,6 +317,8 @@ pub fn destroy(self: *Renderer) void {
     c.vkDestroyDevice(self.logical_device_data.device, null);
     c.vkDestroySurfaceKHR(self.instance, self.surface, null);
     c.vkDestroyInstance(self.instance, null);
+
+    zstbi.deinit();
 }
 
 fn createInstance(allocator: Allocator, required_extensions: [][*:0]const u8, app_info: c.VkApplicationInfo) !c.VkInstance {
@@ -1146,26 +1163,11 @@ fn createBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, size: c
     };
 
     try utils.checkSuccess(c.vkAllocateMemory(device, &alloc_info, null, buffer_memory));
-
     try utils.checkSuccess(c.vkBindBufferMemory(device, buffer.*, buffer_memory.*, 0));
 }
 
 fn copyBuffer(device: c.VkDevice, src_buffer: c.VkBuffer, dst_buffer: c.VkBuffer, size: c.VkDeviceSize, command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !void {
-    const allocInfo: c.VkCommandBufferAllocateInfo = .{
-        .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandPool = command_pool,
-        .commandBufferCount = 1,
-    };
-
-    var command_buffer: c.VkCommandBuffer = undefined;
-    try utils.checkSuccess(c.vkAllocateCommandBuffers(device, &allocInfo, &command_buffer));
-
-    const begin_info: c.VkCommandBufferBeginInfo = .{
-        .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    try utils.checkSuccess(c.vkBeginCommandBuffer(command_buffer, &begin_info));
+    const command_buffer = try beginSingleTimeCommands(device, command_pool);
 
     const copy_region: c.VkBufferCopy = .{
         .srcOffset = 0,
@@ -1174,17 +1176,7 @@ fn copyBuffer(device: c.VkDevice, src_buffer: c.VkBuffer, dst_buffer: c.VkBuffer
     };
     c.vkCmdCopyBuffer(command_buffer, src_buffer, dst_buffer, 1, &copy_region);
 
-    try utils.checkSuccess(c.vkEndCommandBuffer(command_buffer));
-
-    const submit_info: c.VkSubmitInfo = .{
-        .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &command_buffer,
-    };
-    try utils.checkSuccess(c.vkQueueSubmit(transfer_queue, 1, &submit_info, null));
-    try utils.checkSuccess(c.vkQueueWaitIdle(transfer_queue));
-
-    c.vkFreeCommandBuffers(device, command_pool, 1, &command_buffer);
+    try endSingleTimeCommands(device, command_pool, command_buffer, transfer_queue);
 }
 
 fn createIndexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, indices: []u16, transfer_command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !BufferData {
@@ -1242,16 +1234,12 @@ fn createUniformBuffers(device: c.VkDevice, physical_device: c.VkPhysicalDevice)
 
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
         try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &uniform_buffer_data.buffers[i], &uniform_buffer_data.buffers_memory[i]);
-
-        // try utils.checkSuccess(c.vkMapMemory(device, uniform_buffer_data.buffers_memory[i], 0, buffer_size, 0, @ptrCast(&uniform_buffer_data.buffers_mapped[i])));
     }
 
     return uniform_buffer_data;
 }
 
 fn updateUniformBuffer(self: *Renderer) !void {
-    // std.debug.print("width: {d}, height: {d}, aspect: {d}\n", .{ self.swapchain_data.extent.width, self.swapchain_data.extent.height, @as(f32, @floatFromInt(self.swapchain_data.extent.width)) / @as(f32, @floatFromInt(self.swapchain_data.extent.height)) });
-
     const current_time = try time.Instant.now();
     const time_since_start: f32 = @as(f32, @floatFromInt(current_time.since(self.start_time))) / 1_000_000_000;
     const angle = time_since_start * std.math.degreesToRadians(90.0);
@@ -1268,8 +1256,6 @@ fn updateUniformBuffer(self: *Renderer) !void {
     };
 
     ubo.proj[1][1] *= -1;
-
-    // std.debug.print("test: {any}\n", .{ubo.proj});
 
     var data: [*]u8 = undefined;
     try utils.checkSuccess(c.vkMapMemory(self.logical_device_data.device, self.uniform_buffers.buffers_memory[self.current_frame], 0, @sizeOf(UniformBufferObject), 0, @ptrCast(&data)));
@@ -1332,4 +1318,179 @@ fn createDescriptorSets(device: c.VkDevice, descriptor_set_layout: c.VkDescripto
     }
 
     return descriptor_sets;
+}
+
+fn createTextureImage(path: [:0]const u8, device: c.VkDevice, physical_device: c.VkPhysicalDevice, command_pool: c.VkCommandPool, queue: c.VkQueue) !TextureImageData {
+    var image_data = try zstbi.Image.loadFromFile(path, 4);
+    defer image_data.deinit();
+
+    const image_size = image_data.width * image_data.height * 4;
+
+    var staging_buffer: c.VkBuffer = undefined;
+    var staging_buffer_memory: c.VkDeviceMemory = undefined;
+
+    try createBuffer(device, physical_device, image_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &staging_buffer, &staging_buffer_memory);
+
+    var data: [*]u8 = undefined;
+    try utils.checkSuccess(c.vkMapMemory(device, staging_buffer_memory, 0, image_size, 0, @ptrCast(&data)));
+
+    @memcpy(data, std.mem.asBytes(&image_data.data));
+
+    c.vkUnmapMemory(device, staging_buffer_memory);
+
+    var image: c.VkImage = undefined;
+    var image_memory: c.VkDeviceMemory = undefined;
+
+    try createImage(device, physical_device, image_data.width, image_data.height, c.VK_FORMAT_R8G8B8A8_SRGB, c.VK_IMAGE_TILING_OPTIMAL, c.VK_IMAGE_USAGE_TRANSFER_DST_BIT | c.VK_IMAGE_USAGE_SAMPLED_BIT, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &image, &image_memory);
+
+    try transitionImageLayout(device, command_pool, queue, image, c.VK_FORMAT_R8G8B8A8_SRGB, c.VK_IMAGE_LAYOUT_UNDEFINED, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    try copyBufferToImage(device, command_pool, queue, staging_buffer, image, image_data.width, image_data.height);
+
+    try transitionImageLayout(device, command_pool, queue, image, c.VK_FORMAT_R8G8B8A8_SRGB, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    c.vkDestroyBuffer(device, staging_buffer, null);
+    c.vkFreeMemory(device, staging_buffer_memory, null);
+
+    return .{ .image = image, .image_memory = image_memory };
+}
+
+fn createImage(device: c.VkDevice, physical_device: c.VkPhysicalDevice, width: u32, height: u32, format: c.VkFormat, tiling: c.VkImageTiling, usage: c.VkImageUsageFlags, properties: c.VkMemoryPropertyFlags, image: *c.VkImage, image_memory: *c.VkDeviceMemory) !void {
+    const image_info: c.VkImageCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = c.VK_IMAGE_TYPE_2D,
+        .extent = .{
+            .width = width,
+            .height = height,
+            .depth = 1,
+        },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .format = format,
+        .tiling = tiling,
+        .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
+        .usage = usage,
+        .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE,
+        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+    };
+
+    try utils.checkSuccess(c.vkCreateImage(device, &image_info, null, image));
+
+    var mem_requirements: c.VkMemoryRequirements = undefined;
+    c.vkGetImageMemoryRequirements(device, image.*, &mem_requirements);
+
+    const alloc_info: c.VkMemoryAllocateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_requirements.size,
+        .memoryTypeIndex = findMemoryType(
+            physical_device,
+            mem_requirements.memoryTypeBits,
+            properties,
+        ),
+    };
+
+    try utils.checkSuccess(c.vkAllocateMemory(device, &alloc_info, null, image_memory));
+    try utils.checkSuccess(c.vkBindImageMemory(device, image.*, image_memory.*, 0));
+}
+
+fn beginSingleTimeCommands(device: c.VkDevice, command_pool: c.VkCommandPool) !c.VkCommandBuffer {
+    const allocInfo: c.VkCommandBufferAllocateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandPool = command_pool,
+        .commandBufferCount = 1,
+    };
+
+    var command_buffer: c.VkCommandBuffer = undefined;
+    try utils.checkSuccess(c.vkAllocateCommandBuffers(device, &allocInfo, &command_buffer));
+
+    const begin_info: c.VkCommandBufferBeginInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    try utils.checkSuccess(c.vkBeginCommandBuffer(command_buffer, &begin_info));
+
+    return command_buffer;
+}
+
+fn endSingleTimeCommands(device: c.VkDevice, command_pool: c.VkCommandPool, command_buffer: c.VkCommandBuffer, queue: c.VkQueue) !void {
+    try utils.checkSuccess(c.vkEndCommandBuffer(command_buffer));
+
+    const submit_info: c.VkSubmitInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &command_buffer,
+    };
+    try utils.checkSuccess(c.vkQueueSubmit(queue, 1, &submit_info, null));
+    try utils.checkSuccess(c.vkQueueWaitIdle(queue));
+
+    c.vkFreeCommandBuffers(device, command_pool, 1, &command_buffer);
+}
+
+fn transitionImageLayout(device: c.VkDevice, command_pool: c.VkCommandPool, queue: c.VkQueue, image: c.VkImage, format: c.VkFormat, old_layout: c.VkImageLayout, new_layout: c.VkImageLayout) !void {
+    _ = format;
+
+    const command_buffer = try beginSingleTimeCommands(device, command_pool);
+
+    var barrier: c.VkImageMemoryBarrier = .{
+        .sType = c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout = old_layout,
+        .newLayout = new_layout,
+        .srcQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange = .{
+            .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .srcAccessMask = 0,
+        .dstAccessMask = 0,
+    };
+
+    var source_stage: c.VkPipelineStageFlags = undefined;
+    var destination_stage: c.VkPipelineStageFlags = undefined;
+
+    if (old_layout == c.VK_IMAGE_LAYOUT_UNDEFINED and new_layout == c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = c.VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        source_stage = c.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destination_stage = c.VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (old_layout == c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL and new_layout == c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = c.VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = c.VK_ACCESS_SHADER_READ_BIT;
+
+        source_stage = c.VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destination_stage = c.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        return error.UnsupportedLayoutTransition;
+    }
+
+    c.vkCmdPipelineBarrier(command_buffer, source_stage, destination_stage, 0, 0, null, 0, null, 1, &barrier);
+
+    try endSingleTimeCommands(device, command_pool, command_buffer, queue);
+}
+
+fn copyBufferToImage(device: c.VkDevice, command_pool: c.VkCommandPool, queue: c.VkQueue, buffer: c.VkBuffer, image: c.VkImage, width: u32, height: u32) !void {
+    const command_buffer = try beginSingleTimeCommands(device, command_pool);
+
+    const region: c.VkBufferImageCopy = .{
+        .bufferOffset = 0,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = .{
+            .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset = c.VkOffset3D{ .x = 0, .y = 0, .z = 0 },
+        .imageExtent = c.VkExtent3D{ .width = width, .height = height, .depth = 1 },
+    };
+
+    c.vkCmdCopyBufferToImage(command_buffer, buffer, image, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    try endSingleTimeCommands(device, command_pool, command_buffer, queue);
 }

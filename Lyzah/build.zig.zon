@@ -8,5 +8,9 @@
             .url = "https://github.com/zig-gamedev/zmath/archive/c6aa077003b53aaa3929541201b83bc394ed7ddb.tar.gz",
             .hash = "1220081d55b58b968d953db1afc2fb01b2f5733929144e69522461ce25fa6450d84e",
         },
+        .zstbi = .{
+            .url = "https://github.com/zig-gamedev/zstbi/archive/bcbd249f3f57fb84d6d76f1bc621c7bd3bfaa4a2.tar.gz",
+            .hash = "12208b7d15a730294a7d8ee3a9d3ef145e109f94d0a68be7f0ee282e0630ede093d5"
+        },
     },
 }
