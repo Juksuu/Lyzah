@@ -171,6 +171,8 @@ uniform_buffers: UniformBufferData,
 descriptor_pool: c.VkDescriptorPool,
 descriptor_sets: [MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSet,
 image_data: TextureImageData,
+image_view: c.VkImageView,
+texture_sampler: c.VkSampler,
 
 current_frame: u32,
 last_frame_time: time.Instant,
@@ -232,6 +234,10 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
 
     const image_data = try createTextureImage("textures/texture.jpg", logical_device, physical_device, command_pool, logical_device_data.graphics_queue.queue);
 
+    const image_view = try createImageView(logical_device, image_data.image, c.VK_FORMAT_R8G8B8A8_SRGB);
+
+    const sampler = try createTextureSampler(logical_device, physical_device);
+
     return Renderer{
         .current_frame = 0,
         .last_frame_time = try time.Instant.now(),
@@ -261,6 +267,8 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
         .descriptor_pool = descriptor_pool,
         .descriptor_sets = descriptor_sets,
         .image_data = image_data,
+        .image_view = image_view,
+        .texture_sampler = sampler,
     };
 }
 
@@ -282,6 +290,9 @@ pub fn destroy(self: *Renderer) void {
     }
 
     self.destroySwapchain();
+
+    c.vkDestroySampler(self.logical_device_data.device, self.texture_sampler, null);
+    c.vkDestroyImageView(self.logical_device_data.device, self.image_view, null);
 
     c.vkDestroyImage(self.logical_device_data.device, self.image_data.image, null);
     c.vkFreeMemory(self.logical_device_data.device, self.image_data.image_memory, null);
@@ -441,7 +452,10 @@ fn isDeviceSuitable(allocator: Allocator, physical_device: c.VkPhysicalDevice, s
         swapchain_adequate = swapchain_support.formats.items.len > 0 and swapchain_support.present_modes.items.len > 0;
     }
 
-    return indices.isComplete() and swapchain_adequate;
+    var supported_features: c.VkPhysicalDeviceFeatures = undefined;
+    c.vkGetPhysicalDeviceFeatures(physical_device, &supported_features);
+
+    return indices.isComplete() and extensions_supported and swapchain_adequate and supported_features.samplerAnisotropy != 0;
 }
 
 fn findQueueFamilies(allocator: Allocator, physical_device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !QueueFamilyIndices {
@@ -505,7 +519,9 @@ fn createLogicalDevice(allocator: Allocator, physical_device: c.VkPhysicalDevice
         try queue_create_infos.append(queue_create_info);
     }
 
-    var device_features: c.VkPhysicalDeviceFeatures = .{};
+    var device_features: c.VkPhysicalDeviceFeatures = .{
+        .samplerAnisotropy = c.VK_TRUE,
+    };
 
     var device_create_info: c.VkDeviceCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -668,31 +684,7 @@ fn createSwapChain(allocator: Allocator, physical_device: c.VkPhysicalDevice, su
     const swapchain_image_views = try allocator.alloc(c.VkImageView, image_count);
 
     for (0..swapchain_images.len) |i| {
-        const components: c.VkComponentMapping = .{
-            .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-            .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-            .b = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-            .a = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-        };
-
-        const subresource_range: c.VkImageSubresourceRange = .{
-            .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        };
-
-        var image_view_create_info: c.VkImageViewCreateInfo = .{
-            .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = swapchain_images[i],
-            .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
-            .format = surface_format.format,
-            .components = components,
-            .subresourceRange = subresource_range,
-        };
-
-        try utils.checkSuccess(c.vkCreateImageView(device, &image_view_create_info, null, &swapchain_image_views[i]));
+        swapchain_image_views[i] = try createImageView(device, swapchain_images[i], surface_format.format);
     }
 
     return SwapchainData{
@@ -1493,4 +1485,54 @@ fn copyBufferToImage(device: c.VkDevice, command_pool: c.VkCommandPool, queue: c
     c.vkCmdCopyBufferToImage(command_buffer, buffer, image, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     try endSingleTimeCommands(device, command_pool, command_buffer, queue);
+}
+
+fn createImageView(device: c.VkDevice, image: c.VkImage, format: c.VkFormat) !c.VkImageView {
+    var image_view_create_info: c.VkImageViewCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image,
+        .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
+        .format = format,
+        .subresourceRange = .{
+            .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+
+    var image_view: c.VkImageView = undefined;
+    try utils.checkSuccess(c.vkCreateImageView(device, &image_view_create_info, null, &image_view));
+
+    return image_view;
+}
+
+fn createTextureSampler(device: c.VkDevice, physical_device: c.VkPhysicalDevice) !c.VkSampler {
+    var device_properties: c.VkPhysicalDeviceProperties = undefined;
+    c.vkGetPhysicalDeviceProperties(physical_device, &device_properties);
+
+    var sampler_create_info: c.VkSamplerCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = c.VK_FILTER_LINEAR,
+        .minFilter = c.VK_FILTER_LINEAR,
+        .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .anisotropyEnable = c.VK_TRUE,
+        .maxAnisotropy = device_properties.limits.maxSamplerAnisotropy,
+        .borderColor = c.VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        .unnormalizedCoordinates = c.VK_FALSE,
+        .compareEnable = c.VK_FALSE,
+        .compareOp = c.VK_COMPARE_OP_ALWAYS,
+        .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .mipLodBias = 0,
+        .minLod = 0,
+        .maxLod = 0,
+    };
+
+    var texture_sampler: c.VkSampler = undefined;
+    try utils.checkSuccess(c.vkCreateSampler(device, &sampler_create_info, null, &texture_sampler));
+
+    return texture_sampler;
 }
