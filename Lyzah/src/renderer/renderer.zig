@@ -27,6 +27,7 @@ const UniformBufferObject = extern struct {
 const Vertex = struct {
     pos: @Vector(2, f32),
     color: @Vector(3, f32),
+    tex_coord: @Vector(2, f32),
 
     pub fn getBindingDescription() c.VkVertexInputBindingDescription {
         const binding_description: c.VkVertexInputBindingDescription = .{
@@ -37,7 +38,7 @@ const Vertex = struct {
         return binding_description;
     }
 
-    pub fn getAttributeDescriptions() [2]c.VkVertexInputAttributeDescription {
+    pub fn getAttributeDescriptions() [3]c.VkVertexInputAttributeDescription {
         const position_attribute: c.VkVertexInputAttributeDescription = .{
             .binding = 0,
             .location = 0,
@@ -52,7 +53,14 @@ const Vertex = struct {
             .offset = @offsetOf(Vertex, "color"),
         };
 
-        return [_]c.VkVertexInputAttributeDescription{ position_attribute, color_attribute };
+        const tex_coord_attribute: c.VkVertexInputAttributeDescription = .{
+            .binding = 0,
+            .location = 2,
+            .format = c.VK_FORMAT_R32G32_SFLOAT,
+            .offset = @offsetOf(Vertex, "tex_coord"),
+        };
+
+        return [_]c.VkVertexInputAttributeDescription{ position_attribute, color_attribute, tex_coord_attribute };
     }
 };
 
@@ -217,10 +225,10 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     const transfer_command_pool = try createCommandPool(logical_device, logical_device_data.transfer_queue.index, c.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
     var vertices = [_]Vertex{
-        .{ .pos = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
-        .{ .pos = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
-        .{ .pos = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 } },
+        .{ .pos = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .tex_coord = .{ 1.0, 0.0 } },
+        .{ .pos = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .tex_coord = .{ 0.0, 0.0 } },
+        .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .tex_coord = .{ 0.0, 1.0 } },
+        .{ .pos = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .tex_coord = .{ 1.0, 1.0 } },
     };
     const vertex_buffer_data = try createVertexBuffer(logical_device, physical_device, &vertices, transfer_command_pool, logical_device_data.transfer_queue.queue);
 
@@ -229,14 +237,14 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
 
     const uniform_buffer_data = try createUniformBuffers(logical_device, physical_device);
 
-    const descriptor_pool = try createDescriptorPool(logical_device);
-    const descriptor_sets = try createDescriptorSets(logical_device, descriptor_set_layout, descriptor_pool, uniform_buffer_data);
-
     const image_data = try createTextureImage("textures/texture.jpg", logical_device, physical_device, command_pool, logical_device_data.graphics_queue.queue);
 
     const image_view = try createImageView(logical_device, image_data.image, c.VK_FORMAT_R8G8B8A8_SRGB);
 
     const sampler = try createTextureSampler(logical_device, physical_device);
+
+    const descriptor_pool = try createDescriptorPool(logical_device);
+    const descriptor_sets = try createDescriptorSets(logical_device, descriptor_set_layout, descriptor_pool, uniform_buffer_data, image_view, sampler);
 
     return Renderer{
         .current_frame = 0,
@@ -1204,10 +1212,20 @@ fn createDescriptorSetLayout(device: c.VkDevice) !c.VkDescriptorSetLayout {
         .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT,
     };
 
+    const sampler_layout_binding: c.VkDescriptorSetLayoutBinding = .{
+        .binding = 1,
+        .descriptorCount = 1,
+        .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImmutableSamplers = null,
+        .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
+
+    var bindings = [_]c.VkDescriptorSetLayoutBinding{ ubo_layout_binding, sampler_layout_binding };
+
     const layout_info: c.VkDescriptorSetLayoutCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindings = &ubo_layout_binding,
+        .bindingCount = bindings.len,
+        .pBindings = &bindings,
     };
 
     var descriptor_set_layout: c.VkDescriptorSetLayout = undefined;
@@ -1258,15 +1276,22 @@ fn updateUniformBuffer(self: *Renderer) !void {
 }
 
 fn createDescriptorPool(device: c.VkDevice) !c.VkDescriptorPool {
-    const pool_size: c.VkDescriptorPoolSize = .{
+    const ubo_pool_size: c.VkDescriptorPoolSize = .{
         .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .descriptorCount = MAX_FRAMES_IN_FLIGHT,
     };
 
+    const sampler_pool_size: c.VkDescriptorPoolSize = .{
+        .type = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = MAX_FRAMES_IN_FLIGHT,
+    };
+
+    var descriptor_pools = [_]c.VkDescriptorPoolSize{ ubo_pool_size, sampler_pool_size };
+
     const pool_info: c.VkDescriptorPoolCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = 1,
-        .pPoolSizes = &pool_size,
+        .poolSizeCount = descriptor_pools.len,
+        .pPoolSizes = &descriptor_pools,
         .maxSets = MAX_FRAMES_IN_FLIGHT,
     };
 
@@ -1276,7 +1301,7 @@ fn createDescriptorPool(device: c.VkDevice) !c.VkDescriptorPool {
     return descriptor_pool;
 }
 
-fn createDescriptorSets(device: c.VkDevice, descriptor_set_layout: c.VkDescriptorSetLayout, descriptor_pool: c.VkDescriptorPool, uniform_buffer_data: UniformBufferData) ![MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSet {
+fn createDescriptorSets(device: c.VkDevice, descriptor_set_layout: c.VkDescriptorSetLayout, descriptor_pool: c.VkDescriptorPool, uniform_buffer_data: UniformBufferData, image_view: c.VkImageView, sampler: c.VkSampler) ![MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSet {
     var layouts: [MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSetLayout = .{descriptor_set_layout} ** MAX_FRAMES_IN_FLIGHT;
 
     const alloc_info: c.VkDescriptorSetAllocateInfo = .{
@@ -1296,7 +1321,13 @@ fn createDescriptorSets(device: c.VkDevice, descriptor_set_layout: c.VkDescripto
             .range = @sizeOf(UniformBufferObject),
         };
 
-        const descriptor_write: c.VkWriteDescriptorSet = .{
+        const image_info: c.VkDescriptorImageInfo = .{
+            .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView = image_view,
+            .sampler = sampler,
+        };
+
+        const buffer_descriptor_write: c.VkWriteDescriptorSet = .{
             .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptor_sets[i],
             .dstBinding = 0,
@@ -1306,7 +1337,19 @@ fn createDescriptorSets(device: c.VkDevice, descriptor_set_layout: c.VkDescripto
             .pBufferInfo = &buffer_info,
         };
 
-        c.vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, null);
+        const image_descriptor_write: c.VkWriteDescriptorSet = .{
+            .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptor_sets[i],
+            .dstBinding = 1,
+            .dstArrayElement = 0,
+            .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .pImageInfo = &image_info,
+        };
+
+        var descriptor_writes = [_]c.VkWriteDescriptorSet{ buffer_descriptor_write, image_descriptor_write };
+
+        c.vkUpdateDescriptorSets(device, descriptor_writes.len, &descriptor_writes, 0, null);
     }
 
     return descriptor_sets;
@@ -1326,7 +1369,7 @@ fn createTextureImage(path: [:0]const u8, device: c.VkDevice, physical_device: c
     var data: [*]u8 = undefined;
     try utils.checkSuccess(c.vkMapMemory(device, staging_buffer_memory, 0, image_size, 0, @ptrCast(&data)));
 
-    @memcpy(data, std.mem.asBytes(&image_data.data));
+    @memcpy(data, image_data.data);
 
     c.vkUnmapMemory(device, staging_buffer_memory);
 
@@ -1526,9 +1569,6 @@ fn createTextureSampler(device: c.VkDevice, physical_device: c.VkPhysicalDevice)
         .compareEnable = c.VK_FALSE,
         .compareOp = c.VK_COMPARE_OP_ALWAYS,
         .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        .mipLodBias = 0,
-        .minLod = 0,
-        .maxLod = 0,
     };
 
     var texture_sampler: c.VkSampler = undefined;
