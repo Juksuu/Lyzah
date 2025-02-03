@@ -135,3 +135,32 @@ pub fn inSlice(comptime T: type, haystack: []T, needle: T) bool {
 
     return false;
 }
+
+pub fn findSupportedFormat(physical_device: c.VkPhysicalDevice, candidates: []c.VkFormat, tiling: c.VkImageTiling, features: c.VkFormatFeatureFlags) !c.VkFormat {
+    for (candidates) |format| {
+        var props: c.VkFormatProperties = undefined;
+        c.vkGetPhysicalDeviceFormatProperties(physical_device, format, &props);
+
+        if (tiling == c.VK_IMAGE_TILING_LINEAR and (props.linearTilingFeatures & features) == features) {
+            return format;
+        } else if (tiling == c.VK_IMAGE_TILING_OPTIMAL and (props.optimalTilingFeatures & features) == features) {
+            return format;
+        }
+    }
+
+    return error.NoSupportedFormat;
+}
+
+pub fn findDepthFormat(physical_device: c.VkPhysicalDevice) !c.VkFormat {
+    var candidates = [_]c.VkFormat{ c.VK_FORMAT_D32_SFLOAT, c.VK_FORMAT_D32_SFLOAT_S8_UINT, c.VK_FORMAT_D24_UNORM_S8_UINT };
+    return findSupportedFormat(
+        physical_device,
+        &candidates,
+        c.VK_IMAGE_TILING_OPTIMAL,
+        c.VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT,
+    );
+}
+
+pub fn hasStencilComponent(format: c.VkFormat) !bool {
+    return format == c.VK_FORMAT_D32_SFLOAT_S8_UINT or format == c.VK_FORMAT_D24_UNORM_S8_UINT;
+}

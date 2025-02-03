@@ -25,7 +25,7 @@ const UniformBufferObject = extern struct {
 };
 
 const Vertex = struct {
-    pos: @Vector(2, f32),
+    pos: @Vector(3, f32),
     color: @Vector(3, f32),
     tex_coord: @Vector(2, f32),
 
@@ -42,7 +42,7 @@ const Vertex = struct {
         const position_attribute: c.VkVertexInputAttributeDescription = .{
             .binding = 0,
             .location = 0,
-            .format = c.VK_FORMAT_R32G32_SFLOAT,
+            .format = c.VK_FORMAT_R32G32B32_SFLOAT,
             .offset = @offsetOf(Vertex, "pos"),
         };
 
@@ -148,6 +148,12 @@ const TextureImageData = struct {
     image_memory: c.VkDeviceMemory,
 };
 
+const DepthResources = struct {
+    image: c.VkImage,
+    image_memory: c.VkDeviceMemory,
+    image_view: c.VkImageView,
+};
+
 pub const RendererSpec = struct {
     name: [*c]const u8,
     required_extensions: [][*:0]const u8,
@@ -181,6 +187,7 @@ descriptor_sets: [MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSet,
 image_data: TextureImageData,
 image_view: c.VkImageView,
 texture_sampler: c.VkSampler,
+depth_resources: DepthResources,
 
 current_frame: u32,
 last_frame_time: time.Instant,
@@ -212,10 +219,9 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     const logical_device = logical_device_data.device;
 
     const swapchain_data = try createSwapChain(std.heap.c_allocator, physical_device, surface, logical_device, glfw_window);
-    const render_pass = try createRenderPass(logical_device, swapchain_data.image_format);
+    const render_pass = try createRenderPass(logical_device, physical_device, swapchain_data.image_format);
     const descriptor_set_layout = try createDescriptorSetLayout(logical_device);
     const graphics_pipeline_data = try createGraphicsPipeline(allocator, logical_device, render_pass, descriptor_set_layout);
-    const frame_buffers = try createFrameBuffers(std.heap.c_allocator, logical_device, render_pass, swapchain_data);
 
     const command_pool = try createCommandPool(logical_device, logical_device_data.graphics_queue.index, c.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
     const command_buffers = try createCommandBuffers(std.heap.c_allocator, logical_device, command_pool);
@@ -225,21 +231,36 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     const transfer_command_pool = try createCommandPool(logical_device, logical_device_data.transfer_queue.index, c.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
     var vertices = [_]Vertex{
-        .{ .pos = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .tex_coord = .{ 1.0, 0.0 } },
-        .{ .pos = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .tex_coord = .{ 0.0, 0.0 } },
-        .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .tex_coord = .{ 0.0, 1.0 } },
-        .{ .pos = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .tex_coord = .{ 1.0, 1.0 } },
+        .{ .pos = .{ -0.5, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 }, .tex_coord = .{ 1.0, 0.0 } },
+        .{ .pos = .{ 0.5, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 }, .tex_coord = .{ 0.0, 0.0 } },
+        .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 0.0, 0.0, 1.0 }, .tex_coord = .{ 0.0, 1.0 } },
+        .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .tex_coord = .{ 1.0, 1.0 } },
+
+        .{ .pos = .{ -0.5, -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .tex_coord = .{ 1.0, 0.0 } },
+        .{ .pos = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .tex_coord = .{ 0.0, 0.0 } },
+        .{ .pos = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .tex_coord = .{ 0.0, 1.0 } },
+        .{ .pos = .{ -0.5, 0.5, -0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .tex_coord = .{ 1.0, 1.0 } },
     };
     const vertex_buffer_data = try createVertexBuffer(logical_device, physical_device, &vertices, transfer_command_pool, logical_device_data.transfer_queue.queue);
 
-    var indices = [_]u16{ 0, 1, 2, 2, 3, 0 };
+    // zig fmt: off
+    var indices = [_]u16{
+        0, 1, 2, 2, 3, 0,
+        4, 5, 6, 6, 7, 4
+    };
+    // zig fmt: on
+
     const index_buffer_data = try createIndexBuffer(logical_device, physical_device, &indices, transfer_command_pool, logical_device_data.transfer_queue.queue);
 
     const uniform_buffer_data = try createUniformBuffers(logical_device, physical_device);
 
+    const depth_resources = try createDepthResources(logical_device, physical_device, swapchain_data.extent);
+
+    const frame_buffers = try createFrameBuffers(std.heap.c_allocator, logical_device, render_pass, swapchain_data, depth_resources.image_view);
+
     const image_data = try createTextureImage("textures/texture.jpg", logical_device, physical_device, command_pool, logical_device_data.graphics_queue.queue);
 
-    const image_view = try createImageView(logical_device, image_data.image, c.VK_FORMAT_R8G8B8A8_SRGB);
+    const image_view = try createImageView(logical_device, image_data.image, c.VK_FORMAT_R8G8B8A8_SRGB, c.VK_IMAGE_ASPECT_COLOR_BIT);
 
     const sampler = try createTextureSampler(logical_device, physical_device);
 
@@ -277,10 +298,15 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
         .image_data = image_data,
         .image_view = image_view,
         .texture_sampler = sampler,
+        .depth_resources = depth_resources,
     };
 }
 
 fn destroySwapchain(self: Renderer) void {
+    c.vkDestroyImageView(self.logical_device_data.device, self.depth_resources.image_view, null);
+    c.vkDestroyImage(self.logical_device_data.device, self.depth_resources.image, null);
+    c.vkFreeMemory(self.logical_device_data.device, self.depth_resources.image_memory, null);
+
     for (self.frame_buffers) |frame_buffer| {
         c.vkDestroyFramebuffer(self.logical_device_data.device, frame_buffer, null);
     }
@@ -692,7 +718,7 @@ fn createSwapChain(allocator: Allocator, physical_device: c.VkPhysicalDevice, su
     const swapchain_image_views = try allocator.alloc(c.VkImageView, image_count);
 
     for (0..swapchain_images.len) |i| {
-        swapchain_image_views[i] = try createImageView(device, swapchain_images[i], surface_format.format);
+        swapchain_image_views[i] = try createImageView(device, swapchain_images[i], surface_format.format, c.VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
     return SwapchainData{
@@ -704,7 +730,7 @@ fn createSwapChain(allocator: Allocator, physical_device: c.VkPhysicalDevice, su
     };
 }
 
-fn createRenderPass(device: c.VkDevice, swapchain_image_format: c.VkFormat) !c.VkRenderPass {
+fn createRenderPass(device: c.VkDevice, physical_device: c.VkPhysicalDevice, swapchain_image_format: c.VkFormat) !c.VkRenderPass {
     const color_attachment: c.VkAttachmentDescription = .{
         .format = swapchain_image_format,
         .samples = c.VK_SAMPLE_COUNT_1_BIT,
@@ -721,25 +747,44 @@ fn createRenderPass(device: c.VkDevice, swapchain_image_format: c.VkFormat) !c.V
         .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     };
 
+    const depth_attachment: c.VkAttachmentDescription = .{
+        .format = try utils.findDepthFormat(physical_device),
+        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+
+    const depth_attachment_ref: c.VkAttachmentReference = .{
+        .attachment = 1,
+        .layout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+
     const subpass: c.VkSubpassDescription = .{
         .pipelineBindPoint = c.VK_PIPELINE_BIND_POINT_GRAPHICS,
         .colorAttachmentCount = 1,
         .pColorAttachments = &color_attachment_ref,
+        .pDepthStencilAttachment = &depth_attachment_ref,
     };
 
     const dependency: c.VkSubpassDependency = .{
         .srcSubpass = c.VK_SUBPASS_EXTERNAL,
         .dstSubpass = 0,
-        .srcStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = 0,
-        .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .srcStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | c.VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        .srcAccessMask = c.VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | c.VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | c.VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
     };
+
+    const attachments = [_]c.VkAttachmentDescription{ color_attachment, depth_attachment };
 
     const render_pass_info: c.VkRenderPassCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &color_attachment,
+        .attachmentCount = attachments.len,
+        .pAttachments = &attachments,
         .subpassCount = 1,
         .pSubpasses = &subpass,
         .dependencyCount = 1,
@@ -845,6 +890,17 @@ fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass:
         .pDynamicStates = @ptrCast(@constCast(&DYNAMIC_STATES)),
     };
 
+    const depth_stencil: c.VkPipelineDepthStencilStateCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = c.VK_TRUE,
+        .depthWriteEnable = c.VK_TRUE,
+        .depthCompareOp = c.VK_COMPARE_OP_LESS,
+        .depthBoundsTestEnable = c.VK_FALSE,
+        .minDepthBounds = 0.0,
+        .maxDepthBounds = 1.0,
+        .stencilTestEnable = c.VK_FALSE,
+    };
+
     const pipeline_info: c.VkGraphicsPipelineCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = 2,
@@ -856,6 +912,7 @@ fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass:
         .pMultisampleState = &multisampling,
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_state,
+        .pDepthStencilState = &depth_stencil,
         .layout = pipeline_layout,
         .renderPass = render_pass,
         .subpass = 0,
@@ -874,17 +931,17 @@ fn createGraphicsPipeline(allocator: Allocator, device: c.VkDevice, render_pass:
     };
 }
 
-fn createFrameBuffers(allocator: Allocator, device: c.VkDevice, render_pass: c.VkRenderPass, swapchain_data: SwapchainData) ![]c.VkFramebuffer {
+fn createFrameBuffers(allocator: Allocator, device: c.VkDevice, render_pass: c.VkRenderPass, swapchain_data: SwapchainData, depth_image_view: c.VkImageView) ![]c.VkFramebuffer {
     const swapchain_frame_buffers = try allocator.alloc(c.VkFramebuffer, swapchain_data.image_views.len);
 
     for (0..swapchain_data.image_views.len) |i| {
-        const attachments = swapchain_data.image_views[i .. i + 1];
+        const attachments = [_]c.VkImageView{ swapchain_data.image_views[i], depth_image_view };
 
         const frame_buffer_create_info: c.VkFramebufferCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .renderPass = render_pass,
-            .attachmentCount = 1,
-            .pAttachments = attachments.ptr,
+            .attachmentCount = attachments.len,
+            .pAttachments = &attachments,
             .width = swapchain_data.extent.width,
             .height = swapchain_data.extent.height,
             .layers = 1,
@@ -931,9 +988,14 @@ pub fn recordCommandBuffer(self: Renderer, command_buffer: c.VkCommandBuffer, im
 
     try utils.checkSuccess(c.vkBeginCommandBuffer(command_buffer, &begin_info));
 
-    const clear_color = [1]c.VkClearValue{c.VkClearValue{
-        .color = c.VkClearColorValue{ .float32 = [_]f32{ 0, 0, 0, 1 } },
-    }};
+    const clear_values = [_]c.VkClearValue{
+        .{
+            .color = c.VkClearColorValue{ .float32 = [_]f32{ 0, 0, 0, 1 } },
+        },
+        .{
+            .depthStencil = c.VkClearDepthStencilValue{ .depth = 1.0, .stencil = 0 },
+        },
+    };
     const render_pass_info: c.VkRenderPassBeginInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = self.graphics_pipeline_data.render_pass,
@@ -942,8 +1004,8 @@ pub fn recordCommandBuffer(self: Renderer, command_buffer: c.VkCommandBuffer, im
             .offset = c.VkOffset2D{ .x = 0, .y = 0 },
             .extent = self.swapchain_data.extent,
         },
-        .clearValueCount = 1,
-        .pClearValues = &clear_color,
+        .clearValueCount = clear_values.len,
+        .pClearValues = &clear_values,
     };
 
     c.vkCmdBeginRenderPass(command_buffer, &render_pass_info, c.VK_SUBPASS_CONTENTS_INLINE);
@@ -1097,7 +1159,8 @@ fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow) !void {
     self.destroySwapchain();
 
     self.swapchain_data = try createSwapChain(std.heap.c_allocator, self.physical_device, self.surface, self.logical_device_data.device, window);
-    self.frame_buffers = try createFrameBuffers(std.heap.c_allocator, self.logical_device_data.device, self.graphics_pipeline_data.render_pass, self.swapchain_data);
+    self.depth_resources = try createDepthResources(self.logical_device_data.device, self.physical_device, self.swapchain_data.extent);
+    self.frame_buffers = try createFrameBuffers(std.heap.c_allocator, self.logical_device_data.device, self.graphics_pipeline_data.render_pass, self.swapchain_data, self.depth_resources.image_view);
 }
 
 fn createVertexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, vertices: []Vertex, transfer_command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !BufferData {
@@ -1530,14 +1593,14 @@ fn copyBufferToImage(device: c.VkDevice, command_pool: c.VkCommandPool, queue: c
     try endSingleTimeCommands(device, command_pool, command_buffer, queue);
 }
 
-fn createImageView(device: c.VkDevice, image: c.VkImage, format: c.VkFormat) !c.VkImageView {
+fn createImageView(device: c.VkDevice, image: c.VkImage, format: c.VkFormat, aspect_flags: c.VkImageAspectFlags) !c.VkImageView {
     var image_view_create_info: c.VkImageViewCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = image,
         .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
         .format = format,
         .subresourceRange = .{
-            .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+            .aspectMask = aspect_flags,
             .baseMipLevel = 0,
             .levelCount = 1,
             .baseArrayLayer = 0,
@@ -1575,4 +1638,21 @@ fn createTextureSampler(device: c.VkDevice, physical_device: c.VkPhysicalDevice)
     try utils.checkSuccess(c.vkCreateSampler(device, &sampler_create_info, null, &texture_sampler));
 
     return texture_sampler;
+}
+
+fn createDepthResources(device: c.VkDevice, physical_device: c.VkPhysicalDevice, swapchain_extent: c.VkExtent2D) !DepthResources {
+    const depth_format = try utils.findDepthFormat(physical_device);
+
+    var depth_image: c.VkImage = undefined;
+    var depth_image_memory: c.VkDeviceMemory = undefined;
+
+    try createImage(device, physical_device, swapchain_extent.width, swapchain_extent.height, depth_format, c.VK_IMAGE_TILING_OPTIMAL, c.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &depth_image, &depth_image_memory);
+
+    const depth_image_view = try createImageView(device, depth_image, depth_format, c.VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    return .{
+        .image = depth_image,
+        .image_memory = depth_image_memory,
+        .image_view = depth_image_view,
+    };
 }
