@@ -164,3 +164,53 @@ pub fn findDepthFormat(physical_device: c.VkPhysicalDevice) !c.VkFormat {
 pub fn hasStencilComponent(format: c.VkFormat) !bool {
     return format == c.VK_FORMAT_D32_SFLOAT_S8_UINT or format == c.VK_FORMAT_D24_UNORM_S8_UINT;
 }
+
+pub const ObjLineData = union(enum) {
+    Vertex: [3]f32,
+    TexCoord: [2]f32,
+    Face: []ObjFace,
+    NotImplemented,
+};
+
+pub const ObjFace = struct {
+    vertex_index: i32,
+    tex_coord_index: i32,
+};
+
+pub fn parseObjLine(allocator: Allocator, line: []u8) !ObjLineData {
+    var token_iter = std.mem.tokenizeAny(u8, line, " ");
+    const line_type = token_iter.next().?;
+
+    if (std.mem.eql(u8, line_type, "v")) {
+        return ObjLineData{
+            .Vertex = .{
+                try std.fmt.parseFloat(f32, token_iter.next().?),
+                try std.fmt.parseFloat(f32, token_iter.next().?),
+                try std.fmt.parseFloat(f32, token_iter.next().?),
+            },
+        };
+    } else if (std.mem.eql(u8, line_type, "vt")) {
+        return ObjLineData{
+            .TexCoord = .{
+                try std.fmt.parseFloat(f32, token_iter.next().?),
+                try std.fmt.parseFloat(f32, token_iter.next().?),
+            },
+        };
+    } else if (std.mem.eql(u8, line_type, "f")) {
+        var faces = std.ArrayList(ObjFace).init(allocator);
+
+        while (token_iter.next()) |face| {
+            var face_iter = std.mem.splitAny(u8, face, "/");
+            try faces.append(.{
+                .vertex_index = try std.fmt.parseInt(i32, face_iter.next().?, 10),
+                .tex_coord_index = try std.fmt.parseInt(i32, face_iter.next().?, 10),
+            });
+        }
+
+        return ObjLineData{
+            .Face = try faces.toOwnedSlice(),
+        };
+    } else {
+        return ObjLineData.NotImplemented;
+    }
+}

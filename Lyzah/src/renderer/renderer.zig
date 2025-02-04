@@ -154,6 +154,11 @@ const DepthResources = struct {
     image_view: c.VkImageView,
 };
 
+const ModelData = struct {
+    vertices: []Vertex,
+    indices: []u32,
+};
+
 pub const RendererSpec = struct {
     name: [*c]const u8,
     required_extensions: [][*:0]const u8,
@@ -178,7 +183,7 @@ sync_objects: SyncObjects,
 vertices: []Vertex,
 vertex_buffer: c.VkBuffer,
 vertex_buffer_memory: c.VkDeviceMemory,
-indices: []u16,
+indices: []u32,
 index_buffer: c.VkBuffer,
 index_buffer_memory: c.VkDeviceMemory,
 uniform_buffers: UniformBufferData,
@@ -230,27 +235,11 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
 
     const transfer_command_pool = try createCommandPool(logical_device, logical_device_data.transfer_queue.index, c.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
-    var vertices = [_]Vertex{
-        .{ .pos = .{ -0.5, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 }, .tex_coord = .{ 1.0, 0.0 } },
-        .{ .pos = .{ 0.5, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 }, .tex_coord = .{ 0.0, 0.0 } },
-        .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 0.0, 0.0, 1.0 }, .tex_coord = .{ 0.0, 1.0 } },
-        .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .tex_coord = .{ 1.0, 1.0 } },
+    const model_data = try loadObjModel(allocator, "assets/viking_room.obj");
 
-        .{ .pos = .{ -0.5, -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .tex_coord = .{ 1.0, 0.0 } },
-        .{ .pos = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .tex_coord = .{ 0.0, 0.0 } },
-        .{ .pos = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .tex_coord = .{ 0.0, 1.0 } },
-        .{ .pos = .{ -0.5, 0.5, -0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .tex_coord = .{ 1.0, 1.0 } },
-    };
-    const vertex_buffer_data = try createVertexBuffer(logical_device, physical_device, &vertices, transfer_command_pool, logical_device_data.transfer_queue.queue);
+    const vertex_buffer_data = try createVertexBuffer(logical_device, physical_device, model_data.vertices, transfer_command_pool, logical_device_data.transfer_queue.queue);
 
-    // zig fmt: off
-    var indices = [_]u16{
-        0, 1, 2, 2, 3, 0,
-        4, 5, 6, 6, 7, 4
-    };
-    // zig fmt: on
-
-    const index_buffer_data = try createIndexBuffer(logical_device, physical_device, &indices, transfer_command_pool, logical_device_data.transfer_queue.queue);
+    const index_buffer_data = try createIndexBuffer(logical_device, physical_device, model_data.indices, transfer_command_pool, logical_device_data.transfer_queue.queue);
 
     const uniform_buffer_data = try createUniformBuffers(logical_device, physical_device);
 
@@ -258,7 +247,7 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
 
     const frame_buffers = try createFrameBuffers(std.heap.c_allocator, logical_device, render_pass, swapchain_data, depth_resources.image_view);
 
-    const image_data = try createTextureImage("textures/texture.jpg", logical_device, physical_device, command_pool, logical_device_data.graphics_queue.queue);
+    const image_data = try createTextureImage("assets/viking_room.png", logical_device, physical_device, command_pool, logical_device_data.graphics_queue.queue);
 
     const image_view = try createImageView(logical_device, image_data.image, c.VK_FORMAT_R8G8B8A8_SRGB, c.VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -286,10 +275,10 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
         .command_buffers = command_buffers,
         .transfer_command_pool = transfer_command_pool,
         .sync_objects = sync_objects,
-        .vertices = &vertices,
+        .vertices = model_data.vertices,
         .vertex_buffer = vertex_buffer_data.buffer,
         .vertex_buffer_memory = vertex_buffer_data.memory,
-        .indices = &indices,
+        .indices = model_data.indices,
         .index_buffer = index_buffer_data.buffer,
         .index_buffer_memory = index_buffer_data.memory,
         .uniform_buffers = uniform_buffer_data,
@@ -1034,7 +1023,7 @@ pub fn recordCommandBuffer(self: Renderer, command_buffer: c.VkCommandBuffer, im
     const offsets = [_]c.VkDeviceSize{0};
     c.vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffers, &offsets);
 
-    c.vkCmdBindIndexBuffer(command_buffer, self.index_buffer, 0, c.VK_INDEX_TYPE_UINT16);
+    c.vkCmdBindIndexBuffer(command_buffer, self.index_buffer, 0, c.VK_INDEX_TYPE_UINT32);
     c.vkCmdBindDescriptorSets(command_buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphics_pipeline_data.layout, 0, 1, &self.descriptor_sets[self.current_frame], 0, null);
     c.vkCmdDrawIndexed(command_buffer, @intCast(self.indices.len), 1, 0, 0, 0);
     c.vkCmdEndRenderPass(command_buffer);
@@ -1242,13 +1231,13 @@ fn copyBuffer(device: c.VkDevice, src_buffer: c.VkBuffer, dst_buffer: c.VkBuffer
     try endSingleTimeCommands(device, command_pool, command_buffer, transfer_queue);
 }
 
-fn createIndexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, indices: []u16, transfer_command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !BufferData {
-    const buffer_size = @sizeOf(u16) * indices.len;
+fn createIndexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, indices: []u32, transfer_command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !BufferData {
+    const buffer_size = @sizeOf(u32) * indices.len;
     var staging_buffer: c.VkBuffer = undefined;
     var staging_buffer_memory: c.VkDeviceMemory = undefined;
     try createBuffer(device, physical_device, buffer_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &staging_buffer, &staging_buffer_memory);
 
-    var data: [*]u16 = undefined;
+    var data: [*]u32 = undefined;
     try utils.checkSuccess(c.vkMapMemory(device, staging_buffer_memory, 0, buffer_size, 0, @ptrCast(&data)));
 
     @memcpy(data, indices);
@@ -1654,5 +1643,81 @@ fn createDepthResources(device: c.VkDevice, physical_device: c.VkPhysicalDevice,
         .image = depth_image,
         .image_memory = depth_image_memory,
         .image_view = depth_image_view,
+    };
+}
+
+fn loadObjModel(allocator: Allocator, path: [:0]const u8) !ModelData {
+    var vertices = std.ArrayList(Vertex).init(allocator);
+    var indices = std.ArrayList(u32).init(allocator);
+
+    // const vertices_data = [_]Vertex{
+    //     .{ .pos = .{ -0.5, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 }, .tex_coord = .{ 1.0, 0.0 } },
+    //     .{ .pos = .{ 0.5, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 }, .tex_coord = .{ 0.0, 0.0 } },
+    //     .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 0.0, 0.0, 1.0 }, .tex_coord = .{ 0.0, 1.0 } },
+    //     .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .tex_coord = .{ 1.0, 1.0 } },
+    //
+    //     .{ .pos = .{ -0.5, -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .tex_coord = .{ 1.0, 0.0 } },
+    //     .{ .pos = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .tex_coord = .{ 0.0, 0.0 } },
+    //     .{ .pos = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .tex_coord = .{ 0.0, 1.0 } },
+    //     .{ .pos = .{ -0.5, 0.5, -0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .tex_coord = .{ 1.0, 1.0 } },
+    // };
+
+    // // zig fmt: off
+    // const indices_data = [_]u32{
+    //     0, 1, 2, 2, 3, 0,
+    //     4, 5, 6, 6, 7, 4
+    // };
+    // // zig fmt: on
+
+    // for (vertices_data) |vertice| {
+    //     try vertices.append(vertice);
+    // }
+    //
+    // for (indices_data) |indice| {
+    //     try indices.append(indice);
+    // }
+
+    var obj_vertex_data = std.ArrayList([3]f32).init(allocator);
+    defer obj_vertex_data.deinit();
+
+    var obj_tex_coord_data = std.ArrayList([2]f32).init(allocator);
+    defer obj_tex_coord_data.deinit();
+
+    var obj_faces_data = std.ArrayList(utils.ObjFace).init(allocator);
+    defer obj_faces_data.deinit();
+
+    var file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    var buf_reader = std.io.bufferedReader(file.reader());
+    var in_stream = buf_reader.reader();
+
+    var buf: [1024]u8 = undefined;
+    while (try in_stream.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+        const data = try utils.parseObjLine(allocator, line);
+        blk: switch (data) {
+            .Vertex => |v| try obj_vertex_data.append(v),
+            .TexCoord => |t| try obj_tex_coord_data.append(t),
+            .Face => |f| try obj_faces_data.appendSlice(f),
+            else => break :blk,
+        }
+    }
+
+    for (obj_faces_data.items) |face| {
+        const pos = obj_vertex_data.items[@intCast(face.vertex_index - 1)];
+        const tex_coord = obj_tex_coord_data.items[@intCast(face.tex_coord_index - 1)];
+
+        try vertices.append(Vertex{
+            .pos = pos,
+            .tex_coord = .{ tex_coord[0], 1 - tex_coord[1] },
+            .color = .{ 1, 1, 1 },
+        });
+
+        try indices.append(@intCast(indices.items.len));
+    }
+
+    return .{
+        .vertices = try vertices.toOwnedSlice(),
+        .indices = try indices.toOwnedSlice(),
     };
 }
