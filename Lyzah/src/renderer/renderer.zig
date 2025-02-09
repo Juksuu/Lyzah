@@ -1648,7 +1648,29 @@ fn createDepthResources(device: c.VkDevice, physical_device: c.VkPhysicalDevice,
 
 fn loadObjModel(allocator: Allocator, path: [:0]const u8) !ModelData {
     var vertices = std.ArrayList(Vertex).init(allocator);
+    defer vertices.deinit();
+
     var indices = std.ArrayList(u32).init(allocator);
+    defer indices.deinit();
+
+    const UniqueVertexContext = struct {
+        const Self = @This();
+
+        pub fn hash(_: Self, key: Vertex) u64 {
+            var h = std.hash.Wyhash.init(0);
+            h.update(std.mem.asBytes(&key.pos));
+            h.update(std.mem.asBytes(&key.tex_coord));
+            h.update(std.mem.asBytes(&key.color));
+            return h.final();
+        }
+
+        pub fn eql(_: Self, a: Vertex, b: Vertex) bool {
+            return std.mem.eql(u8, std.mem.asBytes(&a.pos), std.mem.asBytes(&b.pos));
+        }
+    };
+
+    var unique_vertices = std.HashMap(Vertex, i32, UniqueVertexContext, std.hash_map.default_max_load_percentage).init(allocator);
+    defer unique_vertices.deinit();
 
     // const vertices_data = [_]Vertex{
     //     .{ .pos = .{ -0.5, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 }, .tex_coord = .{ 1.0, 0.0 } },
@@ -1707,13 +1729,18 @@ fn loadObjModel(allocator: Allocator, path: [:0]const u8) !ModelData {
         const pos = obj_vertex_data.items[@intCast(face.vertex_index - 1)];
         const tex_coord = obj_tex_coord_data.items[@intCast(face.tex_coord_index - 1)];
 
-        try vertices.append(Vertex{
+        const vertex = Vertex{
             .pos = pos,
             .tex_coord = .{ tex_coord[0], 1 - tex_coord[1] },
             .color = .{ 1, 1, 1 },
-        });
+        };
 
-        try indices.append(@intCast(indices.items.len));
+        if (!unique_vertices.contains(vertex)) {
+            try unique_vertices.put(vertex, @intCast(vertices.items.len));
+            try vertices.append(vertex);
+        }
+
+        try indices.append(@intCast(unique_vertices.get(vertex).?));
     }
 
     return .{
