@@ -31,7 +31,7 @@
       in rec {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            zigpkgs.master
+            zigpkgs."0.14.0"
             zlspkgs.zls
 
             glfw
