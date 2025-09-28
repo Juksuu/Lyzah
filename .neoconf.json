@@ -1,8 +1,0 @@
-{
-    "lspconfig": {
-        "zls": {
-            "zls.enable_autofix": true,
-            "zls.warn_style": true
-        }
-    }
-}

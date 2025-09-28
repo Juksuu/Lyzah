@@ -7,12 +7,11 @@ pub fn build(b: *std.Build) !void {
 
     const exe = b.addExecutable(.{
         .name = "Sandbox",
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = .{ .src_path = .{
-            .owner = b,
-            .sub_path = "src/main.zig",
-        } },
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/main.zig"),
+        }),
     });
 
     const lyzah_dep = b.dependency("Lyzah", .{});

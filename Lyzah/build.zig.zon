@@ -37,12 +37,12 @@
     // internet connectivity.
     .dependencies = .{
         .zstbi = .{
-            .url = "git+https://github.com/zig-gamedev/zstbi#094c4bba5cdbec167d3f6aaa98cccccd5c99145f",
-            .hash = "zstbi-0.11.0-dev-L0Ea_-eVBwCl8RYA98PhLDw3Fhw5k7FJOHSMDKWDOvqx",
+            .url = "git+https://github.com/zig-gamedev/zstbi#2c4b3100ccb7aed90ecc9439030899764e2a8d47",
+            .hash = "zstbi-0.11.0-dev-L0Ea_yaWBwAHwFoCuyjkFyaiSsbjt4UOrkntR0c_nmzz",
         },
         .zmath = .{
-            .url = "git+https://github.com/zig-gamedev/zmath#6a0747fe6834e58793500e05953c4c6ca045d3e1",
-            .hash = "zmath-0.11.0-dev-wjwivTArAwDIkHSuSiU3KuBvxh7igjJjJMqYRfy3hihO",
+            .url = "git+https://github.com/zig-gamedev/zmath#3a5955b2b72cd081563fbb084eff05bffd1e3fbb",
+            .hash = "zmath-0.11.0-dev-wjwivdMsAwD-xaLj76YHUq3t9JDH-X16xuMTmnDzqbu2",
         },
     },
     .paths = .{

@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("../c.zig");
+const c = @import("../c.zig").libs;
 
 const utils = @import("utils.zig");
 
@@ -49,7 +49,7 @@ pub fn init(allocator: Allocator, spec: WindowSpec) !Window {
 
     // Need to use c allocator when passing the events to glfw user pointer
     const events = try std.heap.c_allocator.create(std.ArrayList(WindowEvent));
-    events.* = std.ArrayList(WindowEvent).init(std.heap.c_allocator);
+    events.* = .empty;
 
     return Window{
         .spec = spec,
@@ -63,10 +63,10 @@ pub fn initWindowEvents(self: *Window) void {
     c.glfwSetWindowUserPointer(self.glfw_window, self.events);
 
     const Callbacks = struct {
-        fn frameBufferResized(window: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
+        fn frameBufferResized(window: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.c) void {
             const events: *std.ArrayList(WindowEvent) = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window)));
 
-            events.append(WindowEvent{
+            events.append(std.heap.c_allocator, WindowEvent{
                 .resize_event = ResizeEvent{ .width = @intCast(width), .height = @intCast(height) },
             }) catch {
                 @panic("Out of memory");
@@ -81,7 +81,7 @@ pub fn destroy(self: *Window) void {
     c.glfwDestroyWindow(self.glfw_window);
     c.glfwTerminate();
 
-    self.events.deinit();
+    self.events.deinit(std.heap.c_allocator);
     std.heap.c_allocator.destroy(self.events);
 }
 

@@ -61,7 +61,7 @@ pub fn run(self: *Application) !void {
             self.onWindowEvent(event);
         }
 
-        self.window.events.clearAndFree();
+        self.window.events.clearAndFree(std.heap.c_allocator);
 
         try self.renderer.drawFrame(self.window.glfw_window);
     }

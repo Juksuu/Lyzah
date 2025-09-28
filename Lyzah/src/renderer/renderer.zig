@@ -2,7 +2,7 @@ const std = @import("std");
 const zmath = @import("zmath");
 const zstbi = @import("zstbi");
 
-const c = @import("../c.zig");
+const c = @import("../c.zig").libs;
 
 const utils = @import("utils.zig");
 
@@ -87,17 +87,17 @@ const SwapchainSupportDetails = struct {
     formats: std.ArrayList(c.VkSurfaceFormatKHR),
     present_modes: std.ArrayList(c.VkPresentModeKHR),
 
-    fn init(allocator: Allocator) SwapchainSupportDetails {
+    fn init() SwapchainSupportDetails {
         return SwapchainSupportDetails{
             .capabilities = undefined,
-            .formats = std.ArrayList(c.VkSurfaceFormatKHR).init(allocator),
-            .present_modes = std.ArrayList(c.VkPresentModeKHR).init(allocator),
+            .formats = .empty,
+            .present_modes = .empty,
         };
     }
 
-    fn deinit(self: *SwapchainSupportDetails) void {
-        self.formats.deinit();
-        self.present_modes.deinit();
+    fn deinit(self: *SwapchainSupportDetails, allocator: std.mem.Allocator) void {
+        self.formats.deinit(allocator);
+        self.present_modes.deinit(allocator);
     }
 };
 
@@ -128,9 +128,9 @@ const GraphicsPipelineData = struct {
 };
 
 const SyncObjects = struct {
-    image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]c.VkSemaphore,
-    render_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]c.VkSemaphore,
     in_flight_fences: [MAX_FRAMES_IN_FLIGHT]c.VkFence,
+    image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]c.VkSemaphore,
+    render_finished_semaphores: std.ArrayList(c.VkSemaphore),
 };
 
 const BufferData = struct {
@@ -232,11 +232,11 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     const command_pool = try createCommandPool(logical_device, logical_device_data.graphics_queue.index, c.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
     const command_buffers = try createCommandBuffers(std.heap.c_allocator, logical_device, command_pool);
 
-    const sync_objects = try createSyncObjects(logical_device);
+    const sync_objects = try createSyncObjects(std.heap.c_allocator, logical_device, swapchain_data.images.len);
 
     const transfer_command_pool = try createCommandPool(logical_device, logical_device_data.transfer_queue.index, c.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
-    const model_data = try loadObjModel(allocator, "assets/viking_room.obj");
+    const model_data = try loadObjModel(allocator, "./assets/viking_room.obj");
 
     const vertex_buffer_data = try createVertexBuffer(logical_device, physical_device, model_data.vertices, transfer_command_pool, logical_device_data.transfer_queue.queue);
 
@@ -292,7 +292,12 @@ pub fn init(allocator: Allocator, spec: RendererSpec, glfw_window: *c.GLFWwindow
     };
 }
 
-fn destroySwapchain(self: Renderer) void {
+fn destroySwapchain(self: *Renderer, allocator: std.mem.Allocator) void {
+    for (self.sync_objects.render_finished_semaphores.items) |semaphore| {
+        c.vkDestroySemaphore(self.logical_device_data.device, semaphore, null);
+    }
+    self.sync_objects.render_finished_semaphores.clearAndFree(allocator);
+
     c.vkDestroyImageView(self.logical_device_data.device, self.depth_resources.image_view, null);
     c.vkDestroyImage(self.logical_device_data.device, self.depth_resources.image, null);
     c.vkFreeMemory(self.logical_device_data.device, self.depth_resources.image_memory, null);
@@ -313,7 +318,8 @@ pub fn destroy(self: *Renderer) void {
         self.destroyDebugMessenger();
     }
 
-    self.destroySwapchain();
+    self.destroySwapchain(std.heap.c_allocator);
+    self.sync_objects.render_finished_semaphores.deinit(std.heap.c_allocator);
 
     c.vkDestroySampler(self.logical_device_data.device, self.texture_sampler, null);
     c.vkDestroyImageView(self.logical_device_data.device, self.image_view, null);
@@ -338,7 +344,6 @@ pub fn destroy(self: *Renderer) void {
 
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
         c.vkDestroySemaphore(self.logical_device_data.device, self.sync_objects.image_available_semaphores[i], null);
-        c.vkDestroySemaphore(self.logical_device_data.device, self.sync_objects.render_finished_semaphores[i], null);
         c.vkDestroyFence(self.logical_device_data.device, self.sync_objects.in_flight_fences[i], null);
     }
 
@@ -384,16 +389,16 @@ fn createInstance(allocator: Allocator, required_extensions: [][*:0]const u8, ap
 }
 
 fn addDebugExtension(allocator: Allocator, required_extensions: [][*:0]const u8) ![][*:0]const u8 {
-    var extensions = std.ArrayList([*:0]const u8).init(allocator);
-    defer extensions.deinit();
+    var extensions: std.ArrayList([*:0]const u8) = .empty;
+    defer extensions.deinit(allocator);
 
-    try extensions.appendSlice(required_extensions[0..required_extensions.len]);
+    try extensions.appendSlice(allocator, required_extensions[0..required_extensions.len]);
 
     if (ENABLE_VALIDATION_LAYERS) {
-        try extensions.append(c.VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        try extensions.append(allocator, c.VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
 
-    return try extensions.toOwnedSlice();
+    return try extensions.toOwnedSlice(allocator);
 }
 
 fn createDebugMessengerCreateInfo() c.VkDebugUtilsMessengerCreateInfoEXT {
@@ -471,7 +476,7 @@ fn isDeviceSuitable(allocator: Allocator, physical_device: c.VkPhysicalDevice, s
     var swapchain_adequate = false;
     if (extensions_supported) {
         var swapchain_support = try querySwapChainSupport(allocator, physical_device, surface);
-        defer swapchain_support.deinit();
+        defer swapchain_support.deinit(allocator);
 
         swapchain_adequate = swapchain_support.formats.items.len > 0 and swapchain_support.present_modes.items.len > 0;
     }
@@ -518,16 +523,16 @@ fn findQueueFamilies(allocator: Allocator, physical_device: c.VkPhysicalDevice, 
 fn createLogicalDevice(allocator: Allocator, physical_device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !LogicalDeviceData {
     const indices = try findQueueFamilies(allocator, physical_device, surface);
 
-    var queue_create_infos = std.ArrayList(c.VkDeviceQueueCreateInfo).init(allocator);
-    defer queue_create_infos.deinit();
+    var queue_create_infos: std.ArrayList(c.VkDeviceQueueCreateInfo) = .empty;
+    defer queue_create_infos.deinit(allocator);
 
     const all_queue_families = [_]u32{ indices.graphics_family.?, indices.present_family.?, indices.transfer_family.? };
-    var unique_queue_families = std.ArrayList(u32).init(allocator);
-    defer unique_queue_families.deinit();
+    var unique_queue_families: std.ArrayList(u32) = .empty;
+    defer unique_queue_families.deinit(allocator);
 
     for (all_queue_families) |queue_family| {
         if (!utils.inSlice(u32, unique_queue_families.items, queue_family)) {
-            try unique_queue_families.append(queue_family);
+            try unique_queue_families.append(allocator, queue_family);
         }
     }
 
@@ -540,7 +545,7 @@ fn createLogicalDevice(allocator: Allocator, physical_device: c.VkPhysicalDevice
             .pQueuePriorities = &queue_priority,
         };
 
-        try queue_create_infos.append(queue_create_info);
+        try queue_create_infos.append(allocator, queue_create_info);
     }
 
     var device_features: c.VkPhysicalDeviceFeatures = .{
@@ -590,14 +595,14 @@ fn createSurface(instance: c.VkInstance, window: *c.GLFWwindow) !c.VkSurfaceKHR 
 }
 
 fn querySwapChainSupport(allocator: Allocator, physical_device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !SwapchainSupportDetails {
-    var details = SwapchainSupportDetails.init(allocator);
+    var details = SwapchainSupportDetails.init();
     try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &details.capabilities));
 
     var format_count: u32 = 0;
     try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, null));
 
     if (format_count != 0) {
-        try details.formats.resize(format_count);
+        try details.formats.resize(allocator, format_count);
         try utils.checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, details.formats.items.ptr));
     }
 
@@ -605,7 +610,7 @@ fn querySwapChainSupport(allocator: Allocator, physical_device: c.VkPhysicalDevi
     try utils.checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_mode_count, null));
 
     if (present_mode_count != 0) {
-        try details.present_modes.resize(present_mode_count);
+        try details.present_modes.resize(allocator, present_mode_count);
         try utils.checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_mode_count, details.present_modes.items.ptr));
     }
 
@@ -653,7 +658,7 @@ fn chooseSwapExtent(capabilities: c.VkSurfaceCapabilitiesKHR, window: *c.GLFWwin
 
 fn createSwapChain(allocator: Allocator, physical_device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR, device: c.VkDevice, window: *c.GLFWwindow) !SwapchainData {
     var swapchain_support_details = try querySwapChainSupport(allocator, physical_device, surface);
-    defer swapchain_support_details.deinit();
+    defer swapchain_support_details.deinit(allocator);
 
     const surface_format = chooseSwapSurfaceFormat(swapchain_support_details.formats);
     const present_mode = chooseSwapPresentMode(swapchain_support_details.present_modes);
@@ -684,12 +689,12 @@ fn createSwapChain(allocator: Allocator, physical_device: c.VkPhysicalDevice, su
 
     const indices = try findQueueFamilies(allocator, physical_device, surface);
     const all_queue_families = [_]u32{ indices.graphics_family.?, indices.present_family.?, indices.transfer_family.? };
-    var unique_queue_families = std.ArrayList(u32).init(allocator);
-    defer unique_queue_families.deinit();
+    var unique_queue_families: std.ArrayList(u32) = .empty;
+    defer unique_queue_families.deinit(allocator);
 
     for (all_queue_families) |queue_family| {
         if (!utils.inSlice(u32, unique_queue_families.items, queue_family)) {
-            try unique_queue_families.append(queue_family);
+            try unique_queue_families.append(allocator, queue_family);
         }
     }
 
@@ -1032,11 +1037,11 @@ pub fn recordCommandBuffer(self: Renderer, command_buffer: c.VkCommandBuffer, im
     try utils.checkSuccess(c.vkEndCommandBuffer(command_buffer));
 }
 
-fn createSyncObjects(device: c.VkDevice) !SyncObjects {
+fn createSyncObjects(allocator: std.mem.Allocator, device: c.VkDevice, swapchain_image_count: usize) !SyncObjects {
     var sync_objects = SyncObjects{
-        .image_available_semaphores = undefined,
-        .render_finished_semaphores = undefined,
         .in_flight_fences = undefined,
+        .image_available_semaphores = undefined,
+        .render_finished_semaphores = .empty,
     };
 
     const semaphore_info: c.VkSemaphoreCreateInfo = .{
@@ -1049,9 +1054,14 @@ fn createSyncObjects(device: c.VkDevice) !SyncObjects {
     };
 
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
-        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphore_info, null, &sync_objects.image_available_semaphores[i]));
-        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphore_info, null, &sync_objects.render_finished_semaphores[i]));
         try utils.checkSuccess(c.vkCreateFence(device, &fence_info, null, &sync_objects.in_flight_fences[i]));
+        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphore_info, null, &sync_objects.image_available_semaphores[i]));
+    }
+
+    for (0..swapchain_image_count) |_| {
+        var semaphore: c.VkSemaphore = undefined;
+        try utils.checkSuccess(c.vkCreateSemaphore(device, &semaphore_info, null, &semaphore));
+        try sync_objects.render_finished_semaphores.append(allocator, semaphore);
     }
 
     return sync_objects;
@@ -1066,19 +1076,18 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
 
     const in_flight_fence = self.sync_objects.in_flight_fences[self.current_frame];
     const image_available_semaphore = self.sync_objects.image_available_semaphores[self.current_frame];
-    const render_finished_semaphore = self.sync_objects.render_finished_semaphores[self.current_frame];
 
     const command_buffer = self.command_buffers[self.current_frame];
 
     try utils.checkSuccess(c.vkWaitForFences(self.logical_device_data.device, 1, &in_flight_fence, c.VK_TRUE, maxInt(u64)));
 
     var image_index: u32 = undefined;
-    const aquire_result = c.vkAcquireNextImageKHR(self.logical_device_data.device, self.swapchain_data.swapchain, maxInt(u64), image_available_semaphore, null, &image_index);
+    const acquire_result = c.vkAcquireNextImageKHR(self.logical_device_data.device, self.swapchain_data.swapchain, maxInt(u64), image_available_semaphore, null, &image_index);
 
-    if (aquire_result == c.VK_ERROR_OUT_OF_DATE_KHR) {
-        try self.recreateSwapchain(window);
+    if (acquire_result == c.VK_ERROR_OUT_OF_DATE_KHR) {
+        try self.recreateSwapchain(window, std.heap.c_allocator);
         return;
-    } else if (aquire_result != c.VK_SUCCESS and aquire_result != c.VK_SUBOPTIMAL_KHR) {
+    } else if (acquire_result != c.VK_SUCCESS and acquire_result != c.VK_SUBOPTIMAL_KHR) {
         return error.VulkanFailedToAquireSwapchainImage;
     }
 
@@ -1092,6 +1101,8 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
 
     const wait_semaphores = [_]c.VkSemaphore{image_available_semaphore};
     const wait_stages = [_]c.VkPipelineStageFlags{c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+    const render_finished_semaphore = self.sync_objects.render_finished_semaphores.items[image_index];
 
     const signal_semaphores = [_]c.VkSemaphore{render_finished_semaphore};
 
@@ -1122,7 +1133,7 @@ pub fn drawFrame(self: *Renderer, window: *c.GLFWwindow) !void {
 
     if (present_result == c.VK_ERROR_OUT_OF_DATE_KHR or present_result == c.VK_SUBOPTIMAL_KHR or self.frame_buffer_resized) {
         self.frame_buffer_resized = false;
-        try self.recreateSwapchain(window);
+        try self.recreateSwapchain(window, std.heap.c_allocator);
     } else if (present_result != c.VK_SUCCESS) {
         return error.VulkanFailedToPresentSwapchainImage;
     }
@@ -1134,7 +1145,7 @@ pub fn waitForDevice(self: Renderer) !void {
     try utils.checkSuccess(c.vkDeviceWaitIdle(self.logical_device_data.device));
 }
 
-fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow) !void {
+fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow, allocator: std.mem.Allocator) !void {
     var width: c_int = 0;
     var height: c_int = 0;
     c.glfwGetFramebufferSize(window, &width, &height);
@@ -1146,11 +1157,21 @@ fn recreateSwapchain(self: *Renderer, window: *c.GLFWwindow) !void {
 
     try self.waitForDevice();
 
-    self.destroySwapchain();
+    self.destroySwapchain(allocator);
 
     self.swapchain_data = try createSwapChain(std.heap.c_allocator, self.physical_device, self.surface, self.logical_device_data.device, window);
     self.depth_resources = try createDepthResources(self.logical_device_data.device, self.physical_device, self.swapchain_data.extent);
     self.frame_buffers = try createFrameBuffers(std.heap.c_allocator, self.logical_device_data.device, self.graphics_pipeline_data.render_pass, self.swapchain_data, self.depth_resources.image_view);
+
+    const semaphore_info: c.VkSemaphoreCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+
+    for (0..self.swapchain_data.images.len) |_| {
+        var semaphore: c.VkSemaphore = undefined;
+        try utils.checkSuccess(c.vkCreateSemaphore(self.logical_device_data.device, &semaphore_info, null, &semaphore));
+        try self.sync_objects.render_finished_semaphores.append(allocator, semaphore);
+    }
 }
 
 fn createVertexBuffer(device: c.VkDevice, physical_device: c.VkPhysicalDevice, vertices: []Vertex, transfer_command_pool: c.VkCommandPool, transfer_queue: c.VkQueue) !BufferData {
@@ -1652,11 +1673,11 @@ fn createDepthResources(device: c.VkDevice, physical_device: c.VkPhysicalDevice,
 }
 
 fn loadObjModel(allocator: Allocator, path: [:0]const u8) !ModelData {
-    var vertices = std.ArrayList(Vertex).init(allocator);
-    defer vertices.deinit();
+    var vertices: std.ArrayList(Vertex) = .empty;
+    defer vertices.deinit(allocator);
 
-    var indices = std.ArrayList(u32).init(allocator);
-    defer indices.deinit();
+    var indices: std.ArrayList(u32) = .empty;
+    defer indices.deinit(allocator);
 
     const UniqueVertexContext = struct {
         const Self = @This();
@@ -1704,29 +1725,33 @@ fn loadObjModel(allocator: Allocator, path: [:0]const u8) !ModelData {
     //     try indices.append(indice);
     // }
 
-    var obj_vertex_data = std.ArrayList([3]f32).init(allocator);
-    defer obj_vertex_data.deinit();
+    var obj_vertex_data: std.ArrayList([3]f32) = .empty;
+    defer obj_vertex_data.deinit(allocator);
 
-    var obj_tex_coord_data = std.ArrayList([2]f32).init(allocator);
-    defer obj_tex_coord_data.deinit();
+    var obj_tex_coord_data: std.ArrayList([2]f32) = .empty;
+    defer obj_tex_coord_data.deinit(allocator);
 
-    var obj_faces_data = std.ArrayList(utils.ObjFace).init(allocator);
-    defer obj_faces_data.deinit();
+    var obj_faces_data: std.ArrayList(utils.ObjFace) = .empty;
+    defer obj_faces_data.deinit(allocator);
 
-    var file = try std.fs.cwd().openFile(path, .{});
+    var file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
     defer file.close();
 
-    var buf_reader = std.io.bufferedReader(file.reader());
-    var in_stream = buf_reader.reader();
-
     var buf: [1024]u8 = undefined;
-    while (try in_stream.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+    var reader = file.reader(&buf);
+
+    while (reader.interface.takeDelimiterExclusive('\n')) |line| {
         const data = try utils.parseObjLine(allocator, line);
         blk: switch (data) {
-            .Vertex => |v| try obj_vertex_data.append(v),
-            .TexCoord => |t| try obj_tex_coord_data.append(t),
-            .Face => |f| try obj_faces_data.appendSlice(f),
+            .Vertex => |v| try obj_vertex_data.append(allocator, v),
+            .TexCoord => |t| try obj_tex_coord_data.append(allocator, t),
+            .Face => |f| try obj_faces_data.appendSlice(allocator, f),
             else => break :blk,
+        }
+    } else |err| {
+        if (err != error.EndOfStream) {
+            std.debug.print("A reading error occurred: {any}\n", .{err});
+            return err;
         }
     }
 
@@ -1742,15 +1767,15 @@ fn loadObjModel(allocator: Allocator, path: [:0]const u8) !ModelData {
 
         if (!unique_vertices.contains(vertex)) {
             try unique_vertices.put(vertex, @intCast(vertices.items.len));
-            try vertices.append(vertex);
+            try vertices.append(allocator, vertex);
         }
 
-        try indices.append(@intCast(unique_vertices.get(vertex).?));
+        try indices.append(allocator, @intCast(unique_vertices.get(vertex).?));
     }
 
     return .{
-        .vertices = try vertices.toOwnedSlice(),
-        .indices = try indices.toOwnedSlice(),
+        .vertices = try vertices.toOwnedSlice(allocator),
+        .indices = try indices.toOwnedSlice(allocator),
     };
 }
 

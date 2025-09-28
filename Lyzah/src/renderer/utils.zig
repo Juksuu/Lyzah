@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("../c.zig");
+const c = @import("../c.zig").libs;
 
 const Allocator = std.mem.Allocator;
 
@@ -73,7 +73,7 @@ pub fn debugCallback(
     msg_type: c.VkDebugUtilsMessageTypeFlagsEXT,
     callback_data: ?*const c.VkDebugUtilsMessengerCallbackDataEXT,
     user_data: ?*anyopaque,
-) callconv(.C) c.VkBool32 {
+) callconv(.c) c.VkBool32 {
     _ = user_data;
     const severity_str = switch (severity) {
         c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT => "verbose",
@@ -117,7 +117,7 @@ pub fn createShaderModule(code: []const u8, device: c.VkDevice) !c.VkShaderModul
     const create_info: c.VkShaderModuleCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = code.len,
-        .pCode = @alignCast(@ptrCast(code.ptr)),
+        .pCode = @ptrCast(@alignCast(code.ptr)),
     };
 
     var shader_module: c.VkShaderModule = undefined;
@@ -197,18 +197,18 @@ pub fn parseObjLine(allocator: Allocator, line: []u8) !ObjLineData {
             },
         };
     } else if (std.mem.eql(u8, line_type, "f")) {
-        var faces = std.ArrayList(ObjFace).init(allocator);
+        var faces: std.ArrayList(ObjFace) = .empty;
 
         while (token_iter.next()) |face| {
             var face_iter = std.mem.splitAny(u8, face, "/");
-            try faces.append(.{
+            try faces.append(allocator, .{
                 .vertex_index = try std.fmt.parseInt(i32, face_iter.next().?, 10),
                 .tex_coord_index = try std.fmt.parseInt(i32, face_iter.next().?, 10),
             });
         }
 
         return ObjLineData{
-            .Face = try faces.toOwnedSlice(),
+            .Face = try faces.toOwnedSlice(allocator),
         };
     } else {
         return ObjLineData.NotImplemented;

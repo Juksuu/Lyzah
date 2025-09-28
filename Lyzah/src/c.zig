@@ -1,4 +1,4 @@
-pub usingnamespace @cImport({
+pub const libs = @cImport({
     @cInclude("vulkan/vulkan.h");
 
     @cDefine("GLFW_INCLUDE_NONE", {});
