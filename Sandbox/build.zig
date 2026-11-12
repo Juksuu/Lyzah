@@ -17,9 +17,9 @@ pub fn build(b: *std.Build) !void {
     const lyzah_dep = b.dependency("Lyzah", .{});
 
     exe.root_module.addImport("Lyzah", lyzah_dep.module("Lyzah"));
-    exe.linkLibC();
-    exe.linkSystemLibrary("glfw");
-    exe.linkSystemLibrary("vulkan");
+    // exe.linkLibC();
+    // exe.linkSystemLibrary("glfw");
+    // exe.linkSystemLibrary("vulkan");
 
     b.installArtifact(exe);
 
@@ -30,10 +30,7 @@ pub fn build(b: *std.Build) !void {
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(shader_step);
-
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);

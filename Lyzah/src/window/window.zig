@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("../c.zig").libs;
+const c = @import("c");
 
 const utils = @import("utils.zig");
 

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Allocator = std.mem.Allocator;
 
@@ -9,15 +10,25 @@ const Renderer = @import("renderer/renderer.zig");
 
 const Application = @This();
 
-gpa: std.heap.GeneralPurposeAllocator(.{}),
 allocator: Allocator,
+safe_allocator: std.heap.SafeAllocator,
+
+io: std.Io,
+threaded: std.Io.Threaded,
 
 window: Window,
 renderer: Renderer,
 
 pub fn init() !Application {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    var safe_allocator: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+    const allocator: Allocator =
+        if (builtin.mode == .debug)
+            safe_allocator.allocator()
+        else
+            std.heap.smp_allocator;
+
+    var threaded: std.Io.Threaded = .init(allocator, .{});
+    const io = threaded.io();
 
     var window = try Window.init(
         allocator,
@@ -31,10 +42,15 @@ pub fn init() !Application {
     window.initWindowEvents();
 
     return Application{
-        .gpa = gpa,
         .allocator = allocator,
+        .safe_allocator = safe_allocator,
+
+        .io = io,
+        .threaded = threaded,
+
         .window = window,
         .renderer = try Renderer.init(
+            io,
             allocator,
             .{
                 .name = "Lyzah",
@@ -49,8 +65,12 @@ pub fn destroy(self: *Application) void {
     self.renderer.destroy();
     self.window.destroy();
 
-    const deinit_status = self.gpa.deinit();
-    if (deinit_status == .leak) @panic("Leaked memory");
+    self.threaded.deinit();
+
+    if (builtin.mode == .debug) {
+        const deinit_status = self.safe_allocator.deinit();
+        if (deinit_status != 0) @panic("Leaked memory");
+    }
 }
 
 pub fn run(self: *Application) !void {

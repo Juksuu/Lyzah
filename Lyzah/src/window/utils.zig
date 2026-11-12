@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("../c.zig").libs;
+const c = @import("c");
 
 pub fn getRequiredInstanceExtensions() [][*:0]const u8 {
     var count: u32 = undefined;

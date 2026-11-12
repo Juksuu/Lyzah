@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("../c.zig").libs;
+const c = @import("c");
 
 const Allocator = std.mem.Allocator;
 
@@ -101,24 +101,21 @@ pub fn debugCallback(
     return c.VK_FALSE;
 }
 
-pub fn readFileToBuffer(allocator: Allocator, file_path: []const u8) ![]u8 {
-    var file = try std.fs.cwd().openFile(file_path, .{ .mode = .read_only });
-    defer file.close();
-
-    const file_size = (try file.stat()).size;
-    const buffer = try allocator.alloc(u8, file_size);
-
-    _ = try file.read(buffer);
-
-    return buffer;
+pub fn readFileToBuffer(io: std.Io, allocator: Allocator, file_path: []const u8) ![]u8 {
+    return try std.Io.Dir.cwd().readFileAlloc(
+        io,
+        file_path,
+        allocator,
+        .limited(std.math.maxInt(usize)),
+    );
 }
 
 pub fn createShaderModule(code: []const u8, device: c.VkDevice) !c.VkShaderModule {
-    const create_info: c.VkShaderModuleCreateInfo = .{
+    const create_info = std.mem.zeroInit(c.VkShaderModuleCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = code.len,
-        .pCode = @ptrCast(@alignCast(code.ptr)),
-    };
+        .pCode = @as(*const u32, @ptrCast(@alignCast(code.ptr))),
+    });
 
     var shader_module: c.VkShaderModule = undefined;
     try checkSuccess(c.vkCreateShaderModule(device, &create_info, null, &shader_module));
@@ -177,7 +174,7 @@ pub const ObjFace = struct {
     tex_coord_index: i32,
 };
 
-pub fn parseObjLine(allocator: Allocator, line: []u8) !ObjLineData {
+pub fn parseObjLine(allocator: Allocator, line: []const u8) !ObjLineData {
     var token_iter = std.mem.tokenizeAny(u8, line, " ");
     const line_type = token_iter.next().?;
 
