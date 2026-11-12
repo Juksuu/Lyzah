@@ -238,7 +238,7 @@ pub fn init(io: std.Io, allocator: Allocator, spec: RendererSpec, glfw_window: *
 
     const transfer_command_pool = try createCommandPool(logical_device, logical_device_data.transfer_queue.index, c.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
-    const model_data = try loadObjModel(io, allocator, "./assets/viking_room.obj");
+    const model_data = try loadObjModel(io, allocator, "sandbox/assets/viking_room.obj");
 
     const vertex_buffer_data = try createVertexBuffer(logical_device, physical_device, model_data.vertices, transfer_command_pool, logical_device_data.transfer_queue.queue);
 
@@ -250,7 +250,7 @@ pub fn init(io: std.Io, allocator: Allocator, spec: RendererSpec, glfw_window: *
 
     const frame_buffers = try createFrameBuffers(std.heap.c_allocator, logical_device, render_pass, swapchain_data, depth_resources.image_view);
 
-    const image_data = try createTextureImage("assets/viking_room.png", logical_device, physical_device, command_pool, logical_device_data.graphics_queue.queue);
+    const image_data = try createTextureImage("sandbox/assets/viking_room.png", logical_device, physical_device, command_pool, logical_device_data.graphics_queue.queue);
 
     const image_view = try createImageView(logical_device, image_data.image, image_data.mip_levels, c.VK_FORMAT_R8G8B8A8_SRGB, c.VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -800,8 +800,8 @@ fn createRenderPass(device: c.VkDevice, physical_device: c.VkPhysicalDevice, swa
 }
 
 fn createGraphicsPipeline(io: std.Io, allocator: Allocator, device: c.VkDevice, render_pass: c.VkRenderPass, descriptor_set_layout: c.VkDescriptorSetLayout) !GraphicsPipelineData {
-    const vert = try utils.readFileToBuffer(io, allocator, "shaders/vert.spv");
-    const frag = try utils.readFileToBuffer(io, allocator, "shaders/frag.spv");
+    const vert = try utils.readFileToBuffer(io, allocator, "sandbox/shaders/vert.spv");
+    const frag = try utils.readFileToBuffer(io, allocator, "sandbox/shaders/frag.spv");
 
     defer allocator.free(vert);
     defer allocator.free(frag);
